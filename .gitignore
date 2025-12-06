@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+target/
+*.bundle.*
+
+# Tauri
+apps/desktop/src-tauri/target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Cache
+.cache/
+*.tsbuildinfo
+
+# Database (local development)
+*.db
+*.sqlite
+*.sqlite3
+
+# Testing
+coverage/
+
+# Misc
+*.local

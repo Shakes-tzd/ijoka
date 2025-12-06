@@ -1,0 +1,155 @@
+[
+  {
+    "category": "infrastructure",
+    "description": "Verify Tauri app builds and runs successfully",
+    "steps": [
+      "Run pnpm install to install dependencies",
+      "Run pnpm dev to start development server",
+      "Verify window opens with AgentKanban title",
+      "Verify system tray icon appears",
+      "Check console for any Rust compilation errors"
+    ],
+    "passes": true,
+    "inProgress": false
+  },
+  {
+    "category": "functional",
+    "description": "SQLite database initializes correctly on app start",
+    "steps": [
+      "Start the app with pnpm dev",
+      "Check that database file is created in app data directory",
+      "Verify tables are created (events, features, sessions, config)",
+      "Test inserting a sample event via HTTP API"
+    ],
+    "passes": true,
+    "inProgress": false
+  },
+  {
+    "category": "functional",
+    "description": "HTTP server accepts and stores events from hooks",
+    "steps": [
+      "Start the app",
+      "POST a test event to http://127.0.0.1:4000/events",
+      "Verify 200 OK response",
+      "Check event appears in database",
+      "Verify event broadcasts to frontend"
+    ],
+    "passes": true,
+    "inProgress": false
+  },
+  {
+    "category": "functional",
+    "description": "File watcher detects feature_list.json changes",
+    "steps": [
+      "Configure a project directory to watch",
+      "Create/modify feature_list.json in that directory",
+      "Verify watcher detects the change",
+      "Check features sync to database",
+      "Verify frontend receives update event"
+    ],
+    "passes": true,
+    "inProgress": false
+  },
+  {
+    "category": "ui",
+    "description": "Kanban board displays features in correct columns",
+    "steps": [
+      "Load features from database",
+      "Verify To Do column shows passes:false, inProgress:false",
+      "Verify In Progress column shows inProgress:true",
+      "Verify Done column shows passes:true",
+      "Check category badges display correctly"
+    ],
+    "passes": true,
+    "inProgress": false
+  },
+  {
+    "category": "ui",
+    "description": "Activity timeline shows real-time events",
+    "steps": [
+      "Start the app",
+      "Send events via HTTP API",
+      "Verify events appear in timeline immediately",
+      "Check agent colors display correctly",
+      "Verify timestamps format properly"
+    ],
+    "passes": true,
+    "inProgress": false
+  },
+  {
+    "category": "ui",
+    "description": "Stats bar shows accurate progress metrics",
+    "steps": [
+      "Load features from database",
+      "Verify total count is correct",
+      "Verify completed count matches passes:true",
+      "Verify percentage calculation",
+      "Check active sessions count"
+    ],
+    "passes": true,
+    "inProgress": false
+  },
+  {
+    "category": "functional",
+    "description": "System tray menu works correctly",
+    "steps": [
+      "Click tray icon to show/hide window",
+      "Test Show Dashboard menu item",
+      "Test Scan Projects menu item",
+      "Test Quit menu item",
+      "Verify minimize to tray on window close"
+    ],
+    "passes": true,
+    "inProgress": false
+  },
+  {
+    "category": "functional",
+    "description": "Desktop notifications work for feature completion",
+    "steps": [
+      "Start the app with notifications enabled",
+      "Trigger a feature completion event",
+      "Verify native notification appears",
+      "Check notification title and body content"
+    ],
+    "passes": false,
+    "inProgress": false
+  },
+  {
+    "category": "functional",
+    "description": "Scan Projects discovers feature_list.json files",
+    "steps": [
+      "Create feature_list.json in ~/projects/test-project/",
+      "Trigger Scan Projects from tray menu",
+      "Verify project is discovered",
+      "Check project appears in watched projects config"
+    ],
+    "passes": true,
+    "inProgress": false
+  },
+  {
+    "category": "infrastructure",
+    "description": "Claude plugin installs and hooks work",
+    "steps": [
+      "Run claude /plugin install . in packages/claude-plugin",
+      "Start a Claude Code session",
+      "Verify session-start hook fires",
+      "Check feature_list.json context is loaded",
+      "Verify session-end hook fires on exit"
+    ],
+    "passes": true,
+    "inProgress": false
+  },
+  {
+    "category": "documentation",
+    "description": "README includes complete setup instructions",
+    "steps": [
+      "Review README.md for accuracy",
+      "Verify prerequisites are listed",
+      "Check installation steps work",
+      "Ensure architecture diagram is current",
+      "Add troubleshooting section if missing"
+    ],
+    "passes": true,
+    "inProgress": false
+  }
+]

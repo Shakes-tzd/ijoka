@@ -1,0 +1,38 @@
+{
+  "name": "agentkanban",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Unified observability and task management for AI coding agents",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/agentkanban"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "claude",
+    "codex",
+    "gemini",
+    "kanban",
+    "observability",
+    "tauri"
+  ],
+  "author": "Shakes",
+  "license": "MIT",
+  "scripts": {
+    "dev": "pnpm --filter @agentkanban/desktop dev",
+    "build": "pnpm --filter @agentkanban/desktop build",
+    "desktop:dev": "pnpm --filter @agentkanban/desktop dev",
+    "desktop:build": "pnpm --filter @agentkanban/desktop build",
+    "plugin:install": "cd packages/claude-plugin && claude /plugin install .",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
