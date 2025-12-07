@@ -1,6 +1,6 @@
 use crate::db::{AgentEvent, DbState, Feature, Session};
 use axum::{
-    extract::State,
+    extract::{Path, Query, State},
     http::StatusCode,
     routing::{get, post},
     Json, Router,
@@ -32,8 +32,9 @@ pub async fn start_server(
 
     let router = Router::new()
         .route("/health", get(health))
-        .route("/events", post(receive_event))
+        .route("/events", get(get_events).post(receive_event))
         .route("/events/feature-update", post(receive_feature_update))
+        .route("/events/{id}/link", post(link_event))
         .route("/sessions/start", post(session_start))
         .route("/sessions/end", post(session_end))
         .layer(cors)
@@ -50,6 +51,56 @@ pub async fn start_server(
 
 async fn health() -> &'static str {
     "OK"
+}
+
+#[derive(Deserialize)]
+struct EventsQuery {
+    limit: Option<i64>,
+    unlinked: Option<bool>,
+    project_dir: Option<String>,
+}
+
+async fn get_events(
+    State(state): State<AppState>,
+    Query(query): Query<EventsQuery>,
+) -> Json<Vec<AgentEvent>> {
+    let db: tauri::State<DbState> = state.app.state();
+    let limit = query.limit.unwrap_or(50);
+
+    let events = if query.unlinked.unwrap_or(false) {
+        db.0.get_unlinked_events(query.project_dir.as_deref(), limit)
+            .unwrap_or_default()
+    } else {
+        db.0.get_events(limit).unwrap_or_default()
+    };
+
+    Json(events)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LinkEventRequest {
+    feature_id: String,
+}
+
+async fn link_event(
+    State(state): State<AppState>,
+    Path(event_id): Path<i64>,
+    Json(request): Json<LinkEventRequest>,
+) -> Json<ApiResponse> {
+    let db: tauri::State<DbState> = state.app.state();
+
+    match db.0.link_event_to_feature(event_id, &request.feature_id) {
+        Ok(true) => Json(ApiResponse { ok: true, error: None }),
+        Ok(false) => Json(ApiResponse {
+            ok: false,
+            error: Some("Event not found".to_string()),
+        }),
+        Err(e) => Json(ApiResponse {
+            ok: false,
+            error: Some(e.to_string()),
+        }),
+    }
 }
 
 #[derive(Deserialize)]

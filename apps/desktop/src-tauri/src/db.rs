@@ -213,6 +213,58 @@ impl Database {
         Ok(events)
     }
 
+    /// Get events without a feature_id (unlinked)
+    pub fn get_unlinked_events(&self, project_dir: Option<&str>, limit: i64) -> Result<Vec<AgentEvent>, rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+
+        let (sql, params): (&str, Vec<Box<dyn rusqlite::ToSql>>) = if let Some(dir) = project_dir {
+            (
+                "SELECT id, event_type, source_agent, session_id, project_dir, tool_name, payload, feature_id, created_at
+                 FROM events WHERE (feature_id IS NULL OR feature_id = '') AND project_dir = ?1
+                 ORDER BY created_at DESC LIMIT ?2",
+                vec![Box::new(dir.to_string()), Box::new(limit)]
+            )
+        } else {
+            (
+                "SELECT id, event_type, source_agent, session_id, project_dir, tool_name, payload, feature_id, created_at
+                 FROM events WHERE (feature_id IS NULL OR feature_id = '')
+                 ORDER BY created_at DESC LIMIT ?1",
+                vec![Box::new(limit)]
+            )
+        };
+
+        let mut stmt = conn.prepare(sql)?;
+        let params_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+
+        let events = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                Ok(AgentEvent {
+                    id: Some(row.get(0)?),
+                    event_type: row.get(1)?,
+                    source_agent: row.get(2)?,
+                    session_id: row.get(3)?,
+                    project_dir: row.get(4)?,
+                    tool_name: row.get(5)?,
+                    payload: row.get(6)?,
+                    feature_id: row.get(7)?,
+                    created_at: row.get(8)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(events)
+    }
+
+    /// Update an event's feature_id
+    pub fn link_event_to_feature(&self, event_id: i64, feature_id: &str) -> Result<bool, rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "UPDATE events SET feature_id = ?1 WHERE id = ?2",
+            params![feature_id, event_id],
+        )?;
+        Ok(rows > 0)
+    }
+
     pub fn sync_features(
         &self,
         project_dir: &str,

@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.9"
-# dependencies = ["httpx"]
+# dependencies = []
 # ///
 """
 Smart Feature Matching using Claude Haiku
@@ -14,8 +14,14 @@ import json
 import os
 import sys
 import re
-import httpx
+import subprocess
 from pathlib import Path
+
+try:
+    import httpx
+    HAS_HTTPX = True
+except ImportError:
+    HAS_HTTPX = False
 
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
@@ -72,12 +78,8 @@ def build_tool_context(tool_name: str, tool_input: dict) -> str:
     return "\n".join(parts)
 
 
-def classify_with_haiku(tool_context: str, features: list[dict], api_key: str) -> dict | None:
-    """
-    Use Claude Haiku to intelligently classify which feature the work belongs to.
-    Returns: {"feature_index": int|None, "confidence": int, "reason": str, "should_create": bool}
-    """
-    # Build compact feature list
+def build_classification_prompt(tool_context: str, features: list[dict]) -> str:
+    """Build the prompt for feature classification."""
     feature_lines = []
     for i, f in enumerate(features):
         status = "DONE" if f.get("passes") else ("ACTIVE" if f.get("inProgress") else "TODO")
@@ -85,7 +87,7 @@ def classify_with_haiku(tool_context: str, features: list[dict], api_key: str) -
 
     feature_list_str = "\n".join(feature_lines)
 
-    prompt = f"""You are a feature classifier for a development project. Analyze this tool call and determine which feature it relates to.
+    return f"""You are a feature classifier. Analyze this tool call and determine which feature it relates to.
 
 TOOL CALL:
 {tool_context}
@@ -97,12 +99,53 @@ Rules:
 1. Match based on semantic meaning, not just keywords
 2. Consider file paths, code content, and command context
 3. If work clearly matches a TODO or ACTIVE feature, return that index
-4. If work matches a DONE feature and seems like bug fix/enhancement, return that index
+4. If work matches a DONE feature (bug fix/enhancement), return that index
 5. If work doesn't match any feature well, return null
 6. Be conservative - only match if confident
 
 Respond with ONLY valid JSON (no markdown):
-{{"feature_index": <number or null>, "confidence": <0-100>, "reason": "<10 words max>", "should_create": <true if new feature needed>}}"""
+{{"feature_index": <number or null>, "confidence": <0-100>, "reason": "<10 words max>"}}"""
+
+
+def classify_with_claude_cli(tool_context: str, features: list[dict]) -> dict | None:
+    """
+    Use Claude CLI in headless mode for classification.
+    This is the preferred method as it uses existing Claude Code auth.
+    """
+    prompt = build_classification_prompt(tool_context, features)
+
+    try:
+        result = subprocess.run(
+            ["claude", "--model", "haiku", "-p", prompt],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+            env={**os.environ, "CLAUDE_CODE_ENTRYPOINT": "hook"}
+        )
+
+        if result.returncode == 0 and result.stdout.strip():
+            content = result.stdout.strip()
+            # Clean up response (remove markdown if present)
+            if content.startswith("```"):
+                lines = content.split("\n")
+                content = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
+                if content.startswith("json"):
+                    content = content[4:].strip()
+            return json.loads(content)
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
+        pass
+
+    return None
+
+
+def classify_with_api(tool_context: str, features: list[dict], api_key: str) -> dict | None:
+    """
+    Use Anthropic API directly for classification (fallback).
+    """
+    if not HAS_HTTPX:
+        return None
+
+    prompt = build_classification_prompt(tool_context, features)
 
     try:
         response = httpx.post(
@@ -117,20 +160,37 @@ Respond with ONLY valid JSON (no markdown):
                 "max_tokens": 100,
                 "messages": [{"role": "user", "content": prompt}]
             },
-            timeout=3.0  # Quick timeout - don't block tool execution
+            timeout=3.0
         )
 
         if response.status_code == 200:
             result = response.json()
             content = result["content"][0]["text"].strip()
-            # Clean up response (remove markdown if present)
             if content.startswith("```"):
                 content = content.split("```")[1]
                 if content.startswith("json"):
                     content = content[4:]
             return json.loads(content)
-    except (httpx.TimeoutException, json.JSONDecodeError, KeyError, IndexError):
+    except Exception:
         pass
+
+    return None
+
+
+def classify_with_haiku(tool_context: str, features: list[dict], api_key: str | None = None) -> dict | None:
+    """
+    Use Claude Haiku to intelligently classify which feature the work belongs to.
+    Tries Claude CLI first (uses existing auth), falls back to direct API.
+    Returns: {"feature_index": int|None, "confidence": int, "reason": str}
+    """
+    # Try Claude CLI first (preferred - uses existing auth)
+    result = classify_with_claude_cli(tool_context, features)
+    if result:
+        return result
+
+    # Fall back to direct API if key available
+    if api_key:
+        return classify_with_api(tool_context, features, api_key)
 
     return None
 
