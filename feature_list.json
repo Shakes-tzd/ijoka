@@ -164,5 +164,17 @@
     ],
     "passes": true,
     "inProgress": false
+  },
+  {
+    "category": "functional",
+    "description": "Tool calls are linked to active feature in Activity History",
+    "steps": [
+      "Fix track-event.py to read session_id from hook input JSON",
+      "Fix track-event.py to read cwd from hook input JSON",
+      "Verify ToolCall events include correct featureId",
+      "Verify Activity History shows linked tool calls"
+    ],
+    "passes": true,
+    "inProgress": false
   }
 ]
