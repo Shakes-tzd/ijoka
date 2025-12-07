@@ -9,6 +9,7 @@
   "homepage": "https://agentkanban.com",
   "repository": "https://github.com/Shakes-tzd/agentkanban",
   "license": "MIT",
+  "hooks": "hooks/hooks.json",
   "keywords": [
     "kanban",
     "tasks",
