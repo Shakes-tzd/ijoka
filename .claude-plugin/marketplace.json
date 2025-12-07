@@ -1,0 +1,12 @@
+{
+  "name": "agentkanban",
+  "description": "AgentKanban plugin marketplace - Unified observability for AI coding agents",
+  "plugins": [
+    {
+      "name": "agentkanban",
+      "version": "0.1.0",
+      "description": "Long-running agent workflow with persistent task management",
+      "path": "packages/claude-plugin"
+    }
+  ]
+}
