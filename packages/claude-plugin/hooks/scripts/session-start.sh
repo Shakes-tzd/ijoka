@@ -28,29 +28,44 @@ notify_server() {
 # Load feature list if it exists
 load_features() {
     local feature_file="${PROJECT_DIR}/feature_list.json"
-    
+
     if [ -f "$feature_file" ]; then
         # Count features
         local total=$(jq 'length' "$feature_file")
         local completed=$(jq '[.[] | select(.passes == true)] | length' "$feature_file")
         local remaining=$((total - completed))
         local percentage=0
-        
+
         if [ "$total" -gt 0 ]; then
             percentage=$((completed * 100 / total))
         fi
-        
+
+        # Check for active feature (inProgress: true)
+        local active_feature=$(jq -r '[.[] | select(.inProgress == true)][0].description // empty' "$feature_file")
+        local active_index=$(jq -r 'to_entries | .[] | select(.value.inProgress == true) | .key // empty' "$feature_file" | head -1)
+
         # Get next incomplete feature
-        local next_feature=$(jq -r '[.[] | select(.passes == false)][0].description // "None"' "$feature_file")
-        
-        # Output context for Claude
-        cat << EOF
+        local next_feature=$(jq -r '[.[] | select(.passes == false and .inProgress != true)][0].description // "None"' "$feature_file")
+
+        if [ -n "$active_feature" ]; then
+            # Active feature exists - show it prominently
+            cat << EOF
 {
     "hookSpecificOutput": {
-        "additionalContext": "## Project Status\n\n**Progress:** ${completed}/${total} features complete (${percentage}%)\n\n**Next Feature:** ${next_feature}\n\n**Remember:**\n1. Pick ONE feature from feature_list.json where passes: false\n2. Implement and test thoroughly\n3. Update ONLY passes: false → true when complete\n4. Do NOT remove or edit existing features"
+        "additionalContext": "## Active Feature\n\n**Currently Working On:** ${active_feature}\n\n**Progress:** ${completed}/${total} features complete (${percentage}%)\n\n**Important:** All tool calls in this session will be linked to this feature in AgentKanban.\n\n**When Done:**\n1. Set \`inProgress: false\` and \`passes: true\` for the completed feature\n2. Pick the next feature or run /next-feature"
     }
 }
 EOF
+        else
+            # No active feature - prompt to set one
+            cat << EOF
+{
+    "hookSpecificOutput": {
+        "additionalContext": "## No Active Feature\n\n**Progress:** ${completed}/${total} features complete (${percentage}%)\n\n**Action Required:** Before starting work, set a feature as active:\n\n1. **Option A:** Run \`/next-feature\` to auto-select the next incomplete feature\n2. **Option B:** Manually set \`inProgress: true\` on a feature in feature_list.json\n\n**Next Suggested Feature:** ${next_feature}\n\n**Why This Matters:** Tool calls are only linked to features in AgentKanban when a feature has \`inProgress: true\`. Without this, your work won't be tracked."
+    }
+}
+EOF
+        fi
     else
         # No feature list - suggest creating one
         cat << EOF
