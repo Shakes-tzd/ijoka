@@ -85,6 +85,12 @@ interface ParsedPayload {
   resultSummary?: string
   reason?: string
   lastMessage?: string
+  // New ToolResult fields
+  toolUseId?: string
+  isError?: boolean
+  // Tool use fields from transcript
+  tool?: string
+  inputPreview?: string
   [key: string]: unknown
 }
 
@@ -269,7 +275,49 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <!-- Transcript Updated / Messages -->
+            <!-- Tool Result (from transcript) -->
+            <div v-else-if="parsePayload(event.payload)?.messageType === 'tool_result'" class="tool-detail">
+              <div v-if="parsePayload(event.payload)?.isError" class="result-error-badge">
+                Error
+              </div>
+              <div v-if="parsePayload(event.payload)?.toolUseId" class="detail-meta">
+                Tool Use ID: {{ parsePayload(event.payload)?.toolUseId }}
+              </div>
+              <div v-if="parsePayload(event.payload)?.preview" class="detail-section">
+                <div class="detail-label">Result:</div>
+                <pre :class="['detail-output', parsePayload(event.payload)?.isError ? 'error-output' : '']">{{ parsePayload(event.payload)?.preview }}</pre>
+              </div>
+              <div v-else class="empty-result">
+                <span class="empty-icon">📭</span>
+                <span>No result content captured</span>
+              </div>
+            </div>
+
+            <!-- Tool Use from transcript (fallback when no specific handler matched) -->
+            <div v-else-if="parsePayload(event.payload)?.messageType === 'tool_use'" class="tool-detail">
+              <div class="detail-section">
+                <div class="detail-label">Tool: {{ parsePayload(event.payload)?.tool }}</div>
+              </div>
+              <!-- Show any available fields -->
+              <div v-if="parsePayload(event.payload)?.command" class="detail-section">
+                <div class="detail-label">Command:</div>
+                <pre class="detail-code">{{ parsePayload(event.payload)?.command }}</pre>
+              </div>
+              <div v-if="parsePayload(event.payload)?.filePath" class="detail-section">
+                <div class="detail-label">File:</div>
+                <code class="file-path-full">{{ parsePayload(event.payload)?.filePath }}</code>
+              </div>
+              <div v-if="parsePayload(event.payload)?.pattern" class="detail-section">
+                <div class="detail-label">Pattern:</div>
+                <code class="pattern-code">{{ parsePayload(event.payload)?.pattern }}</code>
+              </div>
+              <div v-if="parsePayload(event.payload)?.inputPreview" class="detail-section">
+                <div class="detail-label">Input:</div>
+                <pre class="detail-code">{{ parsePayload(event.payload)?.inputPreview }}</pre>
+              </div>
+            </div>
+
+            <!-- Transcript Updated / Messages (other types with preview) -->
             <div v-else-if="parsePayload(event.payload)?.preview" class="tool-detail">
               <div class="detail-section">
                 <div class="detail-label">{{ parsePayload(event.payload)?.messageType || 'Content' }}:</div>
@@ -608,5 +656,36 @@ onUnmounted(() => {
   overflow-x: auto;
   max-height: 300px;
   overflow-y: auto;
+}
+
+.result-error-badge {
+  display: inline-block;
+  background: rgba(248, 113, 113, 0.2);
+  color: #f87171;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.error-output {
+  border-left: 4px solid #f87171;
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.empty-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  background: var(--bg-primary);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.empty-icon {
+  font-size: 1.2rem;
 }
 </style>

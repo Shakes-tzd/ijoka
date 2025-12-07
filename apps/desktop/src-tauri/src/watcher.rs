@@ -177,8 +177,30 @@ fn get_last_transcript_entry(path: &Path) -> (Option<String>, Option<String>) {
                         }
                     }
                     if item["type"].as_str() == Some("tool_result") {
+                        let tool_use_id = item["tool_use_id"].as_str().unwrap_or("unknown");
+                        let is_error = item["is_error"].as_bool().unwrap_or(false);
+
+                        // Extract content preview
+                        let content_preview = if let Some(content) = item["content"].as_str() {
+                            content.chars().take(300).collect::<String>()
+                        } else if let Some(arr) = item["content"].as_array() {
+                            // Content can be array of text blocks
+                            arr.iter()
+                                .filter_map(|c| c["text"].as_str())
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                                .chars()
+                                .take(300)
+                                .collect::<String>()
+                        } else {
+                            String::new()
+                        };
+
                         let payload = serde_json::json!({
-                            "messageType": "tool_result"
+                            "messageType": "tool_result",
+                            "toolUseId": tool_use_id,
+                            "isError": is_error,
+                            "preview": content_preview
                         });
                         return (Some("ToolResult".to_string()), Some(payload.to_string()));
                     }
@@ -204,10 +226,87 @@ fn get_last_transcript_entry(path: &Path) -> (Option<String>, Option<String>) {
                 for item in arr {
                     if item["type"].as_str() == Some("tool_use") {
                         let tool = item["name"].as_str().unwrap_or("unknown");
-                        let payload = serde_json::json!({
+                        let tool_input = &item["input"];
+
+                        // Extract common input fields based on tool type
+                        let mut payload = serde_json::json!({
                             "messageType": "tool_use",
                             "tool": tool
                         });
+
+                        // Add tool-specific input details
+                        match tool {
+                            "Bash" => {
+                                if let Some(cmd) = tool_input["command"].as_str() {
+                                    payload["command"] = serde_json::json!(cmd.chars().take(500).collect::<String>());
+                                }
+                                if let Some(desc) = tool_input["description"].as_str() {
+                                    payload["description"] = serde_json::json!(desc);
+                                }
+                            }
+                            "Edit" => {
+                                if let Some(fp) = tool_input["file_path"].as_str() {
+                                    payload["filePath"] = serde_json::json!(fp);
+                                }
+                                if let Some(old) = tool_input["old_string"].as_str() {
+                                    payload["oldString"] = serde_json::json!(old.chars().take(200).collect::<String>());
+                                }
+                                if let Some(new) = tool_input["new_string"].as_str() {
+                                    payload["newString"] = serde_json::json!(new.chars().take(200).collect::<String>());
+                                }
+                            }
+                            "Write" => {
+                                if let Some(fp) = tool_input["file_path"].as_str() {
+                                    payload["filePath"] = serde_json::json!(fp);
+                                }
+                                if let Some(content) = tool_input["content"].as_str() {
+                                    payload["contentPreview"] = serde_json::json!(content.chars().take(200).collect::<String>());
+                                }
+                            }
+                            "Read" => {
+                                if let Some(fp) = tool_input["file_path"].as_str() {
+                                    payload["filePath"] = serde_json::json!(fp);
+                                }
+                                if let Some(offset) = tool_input["offset"].as_i64() {
+                                    payload["offset"] = serde_json::json!(offset);
+                                }
+                                if let Some(limit) = tool_input["limit"].as_i64() {
+                                    payload["limit"] = serde_json::json!(limit);
+                                }
+                            }
+                            "Grep" => {
+                                if let Some(pattern) = tool_input["pattern"].as_str() {
+                                    payload["pattern"] = serde_json::json!(pattern);
+                                }
+                                if let Some(path) = tool_input["path"].as_str() {
+                                    payload["path"] = serde_json::json!(path);
+                                }
+                            }
+                            "Glob" => {
+                                if let Some(pattern) = tool_input["pattern"].as_str() {
+                                    payload["pattern"] = serde_json::json!(pattern);
+                                }
+                                if let Some(path) = tool_input["path"].as_str() {
+                                    payload["path"] = serde_json::json!(path);
+                                }
+                            }
+                            "Task" => {
+                                if let Some(desc) = tool_input["description"].as_str() {
+                                    payload["taskDescription"] = serde_json::json!(desc);
+                                }
+                                if let Some(agent) = tool_input["subagent_type"].as_str() {
+                                    payload["subagentType"] = serde_json::json!(agent);
+                                }
+                            }
+                            _ => {
+                                // For other tools, include a preview of the input
+                                let input_str = tool_input.to_string();
+                                if input_str.len() > 2 { // More than just "{}"
+                                    payload["inputPreview"] = serde_json::json!(input_str.chars().take(300).collect::<String>());
+                                }
+                            }
+                        }
+
                         return (Some(tool.to_string()), Some(payload.to_string()));
                     }
                     if item["type"].as_str() == Some("text") {
@@ -239,8 +338,33 @@ fn get_last_transcript_entry(path: &Path) -> (Option<String>, Option<String>) {
             (Some("Assistant".to_string()), None)
         }
         "result" => {
+            // Standalone result entry (different format)
+            let is_error = entry["is_error"].as_bool().unwrap_or(false);
+            let tool_use_id = entry["tool_use_id"].as_str().unwrap_or("unknown");
+
+            // Extract content preview
+            let content_preview = if let Some(content) = entry["content"].as_str() {
+                content.chars().take(300).collect::<String>()
+            } else if let Some(arr) = entry["content"].as_array() {
+                arr.iter()
+                    .filter_map(|c| c["text"].as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    .chars()
+                    .take(300)
+                    .collect::<String>()
+            } else if let Some(output) = entry["output"].as_str() {
+                // Some results use "output" field
+                output.chars().take(300).collect::<String>()
+            } else {
+                String::new()
+            };
+
             let payload = serde_json::json!({
-                "messageType": "tool_result"
+                "messageType": "tool_result",
+                "toolUseId": tool_use_id,
+                "isError": is_error,
+                "preview": content_preview
             });
             (Some("ToolResult".to_string()), Some(payload.to_string()))
         }
