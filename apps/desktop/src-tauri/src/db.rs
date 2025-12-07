@@ -428,4 +428,18 @@ impl Database {
 
         Ok(projects)
     }
+
+    /// Add a project to watched_projects if not already present.
+    /// Returns true if the project was added, false if already exists.
+    pub fn add_watched_project(&self, project_dir: &str) -> Result<bool, rusqlite::Error> {
+        let mut config = self.get_config()?;
+
+        if config.watched_projects.contains(&project_dir.to_string()) {
+            return Ok(false);
+        }
+
+        config.watched_projects.push(project_dir.to_string());
+        self.save_config(&config)?;
+        Ok(true)
+    }
 }

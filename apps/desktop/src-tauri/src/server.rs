@@ -1,4 +1,4 @@
-use crate::db::{AgentEvent, DbState, Session};
+use crate::db::{AgentEvent, DbState, Feature, Session};
 use axum::{
     extract::State,
     http::StatusCode,
@@ -6,6 +6,7 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
 use tokio::sync::broadcast;
@@ -197,6 +198,23 @@ async fn session_start(
         });
     }
 
+    // Auto-register project if not already watched
+    let project_dir = &incoming.project_dir;
+    match db.0.add_watched_project(project_dir) {
+        Ok(true) => {
+            tracing::info!("Auto-registered new project: {}", project_dir);
+            // Sync features from feature_list.json if it exists
+            sync_features_from_file(&db, project_dir, &state.app);
+        }
+        Ok(false) => {
+            // Project already registered, still sync features in case file changed
+            sync_features_from_file(&db, project_dir, &state.app);
+        }
+        Err(e) => {
+            tracing::error!("Failed to auto-register project: {}", e);
+        }
+    }
+
     // Create session start event
     let event = AgentEvent {
         id: None,
@@ -214,6 +232,65 @@ async fn session_start(
     let _ = state.event_tx.send(event);
 
     Json(ApiResponse { ok: true, error: None })
+}
+
+/// Sync features from feature_list.json file to database
+fn sync_features_from_file(db: &tauri::State<DbState>, project_dir: &str, app: &tauri::AppHandle) {
+    let feature_file = PathBuf::from(project_dir).join("feature_list.json");
+
+    if !feature_file.exists() {
+        return;
+    }
+
+    let content = match std::fs::read_to_string(&feature_file) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to read feature_list.json: {}", e);
+            return;
+        }
+    };
+
+    let features: Vec<serde_json::Value> = match serde_json::from_str(&content) {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::error!("Failed to parse feature_list.json: {}", e);
+            return;
+        }
+    };
+
+    let parsed_features: Vec<Feature> = features
+        .iter()
+        .enumerate()
+        .map(|(i, f)| {
+            let steps = f["steps"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|s| s.as_str().map(String::from))
+                        .collect()
+                });
+
+            Feature {
+                id: format!("{}:{}", project_dir, i),
+                project_dir: project_dir.to_string(),
+                description: f["description"].as_str().unwrap_or("").to_string(),
+                category: f["category"].as_str().unwrap_or("functional").to_string(),
+                passes: f["passes"].as_bool().unwrap_or(false),
+                in_progress: f["inProgress"].as_bool().unwrap_or(false),
+                agent: f["agent"].as_str().map(String::from),
+                steps,
+                updated_at: chrono::Utc::now().to_rfc3339(),
+            }
+        })
+        .collect();
+
+    if let Err(e) = db.0.sync_features(project_dir, parsed_features) {
+        tracing::error!("Failed to sync features: {}", e);
+    } else {
+        tracing::info!("Synced {} features for {}", features.len(), project_dir);
+        // Emit refresh event to frontend
+        let _ = app.emit("features-updated", project_dir);
+    }
 }
 
 #[derive(Deserialize)]
