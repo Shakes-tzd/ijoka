@@ -6,6 +6,7 @@ import KanbanBoard from './components/KanbanBoard.vue'
 import ActivityTimeline from './components/ActivityTimeline.vue'
 import StatsBar from './components/StatsBar.vue'
 import FeatureDetailModal from './components/FeatureDetailModal.vue'
+import ActivityDetailModal from './components/ActivityDetailModal.vue'
 
 interface Feature {
   id: string
@@ -51,6 +52,7 @@ const projects = ref<string[]>([])
 const selectedProject = ref<string | null>(null)
 const loading = ref(true)
 const selectedFeature = ref<Feature | null>(null)
+const selectedEvent = ref<AgentEvent | null>(null)
 const sidebarCollapsed = ref(false)
 
 function toggleSidebar() {
@@ -63,6 +65,14 @@ function openFeatureDetail(feature: Feature) {
 
 function closeFeatureDetail() {
   selectedFeature.value = null
+}
+
+function openEventDetail(event: AgentEvent) {
+  selectedEvent.value = event
+}
+
+function closeEventDetail() {
+  selectedEvent.value = null
 }
 
 const todoFeatures = computed(() =>
@@ -194,7 +204,7 @@ onMounted(async () => {
           {{ sidebarCollapsed ? '◀' : '▶' }}
         </button>
         <div class="sidebar-content" v-show="!sidebarCollapsed">
-          <ActivityTimeline :events="events" />
+          <ActivityTimeline :events="events" @event-click="openEventDetail" />
         </div>
         <div class="collapsed-label" v-show="sidebarCollapsed">
           <span>Activity</span>
@@ -209,6 +219,11 @@ onMounted(async () => {
     <FeatureDetailModal
       :feature="selectedFeature"
       @close="closeFeatureDetail"
+    />
+
+    <ActivityDetailModal
+      :event="selectedEvent"
+      @close="closeEventDetail"
     />
   </div>
 </template>

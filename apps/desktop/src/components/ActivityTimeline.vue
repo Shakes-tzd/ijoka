@@ -7,11 +7,16 @@ interface AgentEvent {
   projectDir: string
   toolName?: string
   payload?: string
+  featureId?: string
   createdAt: string
 }
 
 defineProps<{
   events: AgentEvent[]
+}>()
+
+const emit = defineEmits<{
+  'event-click': [event: AgentEvent]
 }>()
 
 const eventIcons: Record<string, string> = {
@@ -72,6 +77,7 @@ function getProjectName(projectDir: string): string {
         v-for="event in events"
         :key="event.id"
         class="timeline-item"
+        @click="emit('event-click', event)"
       >
         <div class="timeline-icon">
           {{ getEventIcon(event.eventType) }}
@@ -138,10 +144,15 @@ function getProjectName(projectDir: string): string {
   gap: 12px;
   padding: 12px 16px;
   transition: background 0.2s;
+  cursor: pointer;
 }
 
 .timeline-item:hover {
   background: var(--bg-tertiary);
+}
+
+.timeline-item:active {
+  background: var(--card-bg);
 }
 
 .timeline-icon {
