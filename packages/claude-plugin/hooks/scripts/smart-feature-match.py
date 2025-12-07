@@ -259,7 +259,7 @@ def main():
     try:
         hook_input = json.load(sys.stdin)
     except json.JSONDecodeError:
-        print('{"event": "PreToolUse", "continue": true}')
+        print('{"hookSpecificOutput": {"hookEventName": "PreToolUse"}}')
         return
 
     tool_name = hook_input.get("tool_name", "")
@@ -281,13 +281,13 @@ def main():
 
     # Skip meta-tools
     if tool_name in {"TodoRead", "TodoWrite"}:
-        print('{"event": "PreToolUse", "continue": true}')
+        print('{"hookSpecificOutput": {"hookEventName": "PreToolUse"}}')
         return
 
     # Load features
     features = get_feature_list(project_dir)
     if not features:
-        print('{"event": "PreToolUse", "continue": true}')
+        print('{"hookSpecificOutput": {"hookEventName": "PreToolUse"}}')
         return
 
     # Build context for classification
@@ -336,15 +336,14 @@ def main():
 
             desc = feature.get("description", "")[:50]
             print(json.dumps({
-                "event": "PreToolUse",
-                "continue": True,
                 "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
                     "additionalContext": f"**Feature {action}:** \"{desc}\" ({confidence}% - {reason})"
                 }
             }))
             return
 
-    print('{"event": "PreToolUse", "continue": true}')
+    print('{"hookSpecificOutput": {"hookEventName": "PreToolUse"}}')
 
 
 if __name__ == "__main__":

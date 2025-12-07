@@ -25,5 +25,5 @@ VALIDATION_RESULT=$(echo "$INPUT" | uv run "$SCRIPT_DIR/validate-feature-edit.py
 if [ -n "$VALIDATION_RESULT" ]; then
     echo "$VALIDATION_RESULT"
 else
-    echo '{"event": "PreToolUse", "decision": "approve"}'
+    echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse"}}'
 fi

@@ -21,5 +21,5 @@ curl -s -X POST "${SYNC_SERVER}/sessions/end" \
         \"sessionId\": \"${SESSION_ID}\"
     }" --max-time 2 >/dev/null 2>&1 || true
 
-# Output response with event field
-echo '{"event": "SessionEnd", "continue": true}'
+# Output response with correct hookEventName field
+echo '{"hookSpecificOutput": {"hookEventName": "SessionEnd"}}'

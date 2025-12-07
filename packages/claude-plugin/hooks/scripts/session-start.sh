@@ -28,7 +28,7 @@ notify_server() {
 # Output JSON response using jq for proper escaping
 output_response() {
     local context="$1"
-    jq -n --arg ctx "$context" '{event: "SessionStart", hookSpecificOutput: {additionalContext: $ctx}}'
+    jq -c -n --arg ctx "$context" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}'
 }
 
 # Load feature list if it exists
