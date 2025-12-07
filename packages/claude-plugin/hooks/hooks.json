@@ -1,79 +1,32 @@
 {
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Write|Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/validate-feature-edit.py"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "matcher": null,
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-start.sh"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "matcher": null,
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-end.sh"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Write|Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/check-feature-update.py"
-          }
-        ]
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash -c 'AGENTKANBAN_HOOK_TYPE=PostToolUse uv run ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/track-event.py'"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash -c 'AGENTKANBAN_HOOK_TYPE=Stop uv run ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/track-event.py'"
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash -c 'AGENTKANBAN_HOOK_TYPE=SubagentStop uv run ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/track-event.py'"
-          }
-        ]
-      }
-    ]
-  }
+  "hooks": [
+    {
+      "name": "SessionStart",
+      "script": "scripts/session-start.sh",
+      "timeout_ms": 5000,
+      "continue_on_error": true,
+      "description": "Load feature context and notify server on session start"
+    },
+    {
+      "name": "SessionEnd",
+      "script": "scripts/session-end.sh",
+      "timeout_ms": 2000,
+      "continue_on_error": true,
+      "description": "Notify server on session end"
+    },
+    {
+      "name": "PostToolUse",
+      "script": "scripts/post-tool-use.sh",
+      "timeout_ms": 3000,
+      "continue_on_error": true,
+      "description": "Track all tool calls and link to active feature"
+    },
+    {
+      "name": "PreToolUse",
+      "script": "scripts/pre-tool-use.sh",
+      "timeout_ms": 2000,
+      "continue_on_error": false,
+      "description": "Validate feature_list.json edits"
+    }
+  ]
 }
