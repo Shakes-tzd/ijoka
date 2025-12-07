@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.9"
+# dependencies = []
+# ///
 """
 AgentKanban Feature Update Hook
 Runs after Write/Edit tool calls to detect feature_list.json changes

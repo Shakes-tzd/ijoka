@@ -1,5 +1,16 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/validate-feature-edit.py"
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": null,
@@ -28,7 +39,38 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/check-feature-update.py"
+            "command": "uv run ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/check-feature-update.py"
+          }
+        ]
+      },
+      {
+        "matcher": null,
+        "hooks": [
+          {
+            "type": "command",
+            "command": "AGENTKANBAN_HOOK_TYPE=PostToolUse uv run ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/track-event.py"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": null,
+        "hooks": [
+          {
+            "type": "command",
+            "command": "AGENTKANBAN_HOOK_TYPE=Stop uv run ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/track-event.py"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": null,
+        "hooks": [
+          {
+            "type": "command",
+            "command": "AGENTKANBAN_HOOK_TYPE=SubagentStop uv run ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/track-event.py"
           }
         ]
       }
