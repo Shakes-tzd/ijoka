@@ -178,8 +178,6 @@ def summarize_input(tool_name: str, tool_input: dict) -> str:
 def main():
     # Get hook type from environment (set by wrapper or hooks.json)
     hook_type = os.environ.get("AGENTKANBAN_HOOK_TYPE", "PostToolUse")
-    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
-    session_id = os.environ.get("CLAUDE_SESSION_ID", "unknown")
 
     # Read hook input from stdin
     try:
@@ -187,6 +185,10 @@ def main():
     except json.JSONDecodeError:
         print('{"continue": true}')
         return
+
+    # Get session_id and cwd from hook input (Claude Code provides these)
+    session_id = hook_input.get("session_id", "unknown")
+    project_dir = hook_input.get("cwd", os.getcwd())
 
     # Route to appropriate handler
     if hook_type == "PostToolUse":
