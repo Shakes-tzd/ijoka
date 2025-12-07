@@ -348,6 +348,10 @@ fn sync_features_from_file(db: &tauri::State<DbState>, project_dir: &str, app: &
 #[serde(rename_all = "camelCase")]
 struct SessionEndEvent {
     session_id: String,
+    #[serde(default)]
+    source_agent: Option<String>,
+    #[serde(default)]
+    project_dir: Option<String>,
 }
 
 async fn session_end(
@@ -362,12 +366,15 @@ async fn session_end(
          // Continue to log event even if status update fails
     }
 
+    let source = incoming.source_agent.unwrap_or_else(|| "claude-code".to_string());
+    let project = incoming.project_dir.unwrap_or_default();
+
     let event = AgentEvent {
         id: None,
         event_type: "SessionEnd".to_string(),
-        source_agent: "unknown".to_string(),
+        source_agent: source,
         session_id: incoming.session_id,
-        project_dir: "".to_string(),
+        project_dir: project,
         tool_name: None,
         payload: None,
         feature_id: None,

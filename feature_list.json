@@ -6,8 +6,7 @@
       "Run pnpm install to install dependencies",
       "Run pnpm dev to start development server",
       "Verify window opens with AgentKanban title",
-      "Verify system tray icon appears",
-      "Check console for any Rust compilation errors"
+      "Verify system tray icon appears"
     ],
     "passes": true,
     "inProgress": false
@@ -18,8 +17,7 @@
     "steps": [
       "Start the app with pnpm dev",
       "Check that database file is created in app data directory",
-      "Verify tables are created (events, features, sessions, config)",
-      "Test inserting a sample event via HTTP API"
+      "Verify tables are created (events, features, sessions, config)"
     ],
     "passes": true,
     "inProgress": false
@@ -28,11 +26,9 @@
     "category": "functional",
     "description": "HTTP server accepts and stores events from hooks",
     "steps": [
-      "Start the app",
       "POST a test event to http://127.0.0.1:4000/events",
       "Verify 200 OK response",
-      "Check event appears in database",
-      "Verify event broadcasts to frontend"
+      "Check event broadcasts to frontend"
     ],
     "passes": true,
     "inProgress": false
@@ -41,11 +37,9 @@
     "category": "functional",
     "description": "File watcher detects feature_list.json changes",
     "steps": [
-      "Configure a project directory to watch",
-      "Create/modify feature_list.json in that directory",
+      "Modify feature_list.json in watched directory",
       "Verify watcher detects the change",
-      "Check features sync to database",
-      "Verify frontend receives update event"
+      "Check features sync to database"
     ],
     "passes": true,
     "inProgress": false
@@ -54,11 +48,9 @@
     "category": "ui",
     "description": "Kanban board displays features in correct columns",
     "steps": [
-      "Load features from database",
       "Verify To Do column shows passes:false, inProgress:false",
       "Verify In Progress column shows inProgress:true",
-      "Verify Done column shows passes:true",
-      "Check category badges display correctly"
+      "Verify Done column shows passes:true"
     ],
     "passes": true,
     "inProgress": false
@@ -67,10 +59,8 @@
     "category": "ui",
     "description": "Activity timeline shows real-time events",
     "steps": [
-      "Start the app",
       "Send events via HTTP API",
       "Verify events appear in timeline immediately",
-      "Check agent colors display correctly",
       "Verify timestamps format properly"
     ],
     "passes": true,
@@ -80,11 +70,9 @@
     "category": "ui",
     "description": "Stats bar shows accurate progress metrics",
     "steps": [
-      "Load features from database",
       "Verify total count is correct",
       "Verify completed count matches passes:true",
-      "Verify percentage calculation",
-      "Check active sessions count"
+      "Verify percentage calculation"
     ],
     "passes": true,
     "inProgress": false
@@ -95,9 +83,7 @@
     "steps": [
       "Click tray icon to show/hide window",
       "Test Show Dashboard menu item",
-      "Test Scan Projects menu item",
-      "Test Quit menu item",
-      "Verify minimize to tray on window close"
+      "Test Quit menu item"
     ],
     "passes": true,
     "inProgress": false
@@ -106,22 +92,19 @@
     "category": "functional",
     "description": "Desktop notifications work for feature completion",
     "steps": [
-      "Start the app with notifications enabled",
       "Trigger a feature completion event",
-      "Verify native notification appears",
-      "Check notification title and body content"
+      "Verify native notification appears"
     ],
     "passes": false,
-    "inProgress": false
+    "inProgress": false,
+    "workCount": 4
   },
   {
     "category": "functional",
     "description": "Scan Projects discovers feature_list.json files",
     "steps": [
-      "Create feature_list.json in ~/projects/test-project/",
       "Trigger Scan Projects from tray menu",
-      "Verify project is discovered",
-      "Check project appears in watched projects config"
+      "Verify project is discovered"
     ],
     "passes": true,
     "inProgress": false
@@ -132,9 +115,7 @@
     "steps": [
       "Run claude /plugin install . in packages/claude-plugin",
       "Start a Claude Code session",
-      "Verify session-start hook fires",
-      "Check feature_list.json context is loaded",
-      "Verify session-end hook fires on exit"
+      "Verify session-start hook fires"
     ],
     "passes": true,
     "inProgress": false
@@ -144,10 +125,7 @@
     "description": "README includes complete setup instructions",
     "steps": [
       "Review README.md for accuracy",
-      "Verify prerequisites are listed",
-      "Check installation steps work",
-      "Ensure architecture diagram is current",
-      "Add troubleshooting section if missing"
+      "Verify prerequisites are listed"
     ],
     "passes": true,
     "inProgress": false
@@ -157,10 +135,7 @@
     "description": "Different projects have their own separate kanban boards",
     "steps": [
       "Add project selector dropdown in the UI header",
-      "Store features per project in database with project_id foreign key",
-      "Filter kanban board to show only selected project's features",
-      "Add ability to switch between projects without restart",
-      "Persist last selected project in config"
+      "Filter kanban board to show only selected project's features"
     ],
     "passes": true,
     "inProgress": false
@@ -169,9 +144,6 @@
     "category": "functional",
     "description": "Tool calls are linked to active feature in Activity History",
     "steps": [
-      "Fix track-event.py to read session_id from hook input JSON",
-      "Fix track-event.py to read cwd from hook input JSON",
-      "Fix featureId format to use project_dir:index instead of description",
       "Verify ToolCall events include correct featureId",
       "Verify Activity History shows linked tool calls"
     ],
@@ -182,88 +154,57 @@
     "category": "ui",
     "description": "Enhanced tool call and feature details display",
     "steps": [
-      "Display inputSummary, filePaths, success status in Activity History",
-      "Show step count on kanban cards",
-      "Display verification steps checklist in feature detail modal",
-      "Add visual indicators for success/failure on tool call events"
+      "Display inputSummary, filePaths, success status",
+      "Add visual indicators for success/failure"
+    ],
+    "passes": false,
+    "inProgress": true,
+    "workCount": 3
+  },
+  {
+    "category": "ui",
+    "description": "Fix empty events and improve activity card display",
+    "steps": [
+      "Filter out empty TranscriptUpdated events",
+      "Show feature description instead of path:index",
+      "Only create features for constructive tools (Edit, Write, Task)",
+      "Add deduplication for auto-created features"
     ],
     "passes": true,
-    "inProgress": false
+    "inProgress": false,
+    "workCount": 4,
+    "completionCriteria": {
+      "type": "build",
+      "description": "Build must pass",
+      "success_required": true
+    }
   },
   {
-    "category": "testing",
-    "description": "Verify end-to-end tool call tracking and UI display",
+    "category": "ui",
+    "description": "Support unlinked activities and session-based observability",
     "steps": [
-      "Create test feature with inProgress: true",
-      "Perform tool calls (Read, Bash, Edit)",
-      "Check database for ToolCall events with correct feature_id",
-      "Verify Activity History shows tool calls in AgentKanban UI",
-      "Confirm inputSummary and filePaths display correctly"
+      "Add UI section for unlinked/session activities",
+      "Filter activity history by feature work period",
+      "Allow viewing all session events regardless of feature"
     ],
     "passes": false,
     "inProgress": false
   },
   {
     "category": "functional",
-    "description": "Enhance FeatureDetailModal functionality",
-    "steps": [],
-    "passes": false,
-    "inProgress": false
-  },
-  {
-    "category": "functional",
-    "description": "Enhance ActivityDetailModal functionality",
-    "steps": [],
-    "passes": false,
-    "inProgress": false
-  },
-  {
-    "category": "functional",
-    "description": "Enhance ActivityTimeline functionality",
-    "steps": [],
-    "passes": false,
-    "inProgress": false
-  },
-  {
-    "category": "functional",
-    "description": "Enhance FeatureDetailModal functionality",
-    "steps": [],
-    "passes": false,
-    "inProgress": false
-  },
-  {
-    "category": "functional",
-    "description": "Enhance FeatureDetailModal functionality",
-    "steps": [],
-    "passes": false,
-    "inProgress": false
-  },
-  {
-    "category": "functional",
-    "description": "Enhance ActivityDetailModal functionality",
-    "steps": [],
-    "passes": false,
-    "inProgress": false
-  },
-  {
-    "category": "functional",
-    "description": "Make stop.sh executable",
-    "steps": [],
-    "passes": false,
-    "inProgress": false
-  },
-  {
-    "category": "functional",
-    "description": "Enhance smart-feature-match functionality",
-    "steps": [],
-    "passes": false,
-    "inProgress": false
-  },
-  {
-    "category": "functional",
-    "description": "Enhance session-start.sh functionality",
-    "steps": [],
-    "passes": false,
-    "inProgress": true
+    "description": "Enhance session-end.sh functionality",
+    "steps": [
+      "Verify changes in session-end.sh work correctly",
+      "Run /complete-feature when done"
+    ],
+    "passes": true,
+    "inProgress": false,
+    "workCount": 3,
+    "completionCriteria": {
+      "type": "work_count",
+      "count": 3,
+      "description": "Auto-complete after sustained work",
+      "success_required": true
+    }
   }
 ]
