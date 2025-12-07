@@ -193,6 +193,35 @@ def handle_subagent_stop(hook_input: dict, project_dir: str, session_id: str):
     send_event(event)
 
 
+def handle_user_prompt_submit(hook_input: dict, project_dir: str, session_id: str):
+    """Handle UserPromptSubmit events - capture user queries for observability."""
+    # Extract user prompt from hook input
+    user_prompt = hook_input.get("user_prompt", "")
+    if not user_prompt:
+        # Try alternative field names
+        user_prompt = hook_input.get("prompt", "") or hook_input.get("message", "")
+
+    event = {
+        "eventType": "UserQuery",
+        "sourceAgent": "claude-code",
+        "sessionId": session_id,
+        "projectDir": project_dir,
+        "payload": {
+            "prompt": user_prompt[:1000],  # Truncate long prompts
+            "promptLength": len(user_prompt),
+            "preview": user_prompt[:200] if user_prompt else ""
+        }
+    }
+
+    # Get active feature
+    active_feature = get_active_feature(project_dir)
+    if active_feature:
+        event["featureId"] = active_feature["id"]
+        event["payload"]["featureDescription"] = active_feature["description"]
+
+    send_event(event)
+
+
 def summarize_input(tool_name: str, tool_input: dict) -> str:
     """Create a brief summary of the tool input."""
     if tool_name == "Read":
@@ -251,6 +280,8 @@ def main():
         handle_stop(hook_input, project_dir, session_id)
     elif hook_type == "SubagentStop":
         handle_subagent_stop(hook_input, project_dir, session_id)
+    elif hook_type == "UserPromptSubmit":
+        handle_user_prompt_submit(hook_input, project_dir, session_id)
 
     # Always continue
     print('{"continue": true}')

@@ -51,6 +51,7 @@ function getEventIcon(eventType: string): string {
     'TranscriptUpdated': '💬',
     'AgentStop': '🛑',
     'SubagentStop': '🤖',
+    'UserQuery': '💬',
   }
   return icons[eventType] || '📝'
 }
@@ -272,6 +273,17 @@ onUnmounted(() => {
               <div v-if="parsePayload(event.payload)?.lastMessage" class="detail-section">
                 <div class="detail-label">Last Message:</div>
                 <pre class="detail-output">{{ parsePayload(event.payload)?.lastMessage }}</pre>
+              </div>
+            </div>
+
+            <!-- User Query event -->
+            <div v-else-if="event.eventType === 'UserQuery' && parsePayload(event.payload)" class="tool-detail">
+              <div class="detail-section">
+                <div class="detail-label">User Prompt:</div>
+                <pre class="detail-output user-prompt">{{ parsePayload(event.payload)?.prompt || parsePayload(event.payload)?.preview }}</pre>
+              </div>
+              <div v-if="parsePayload(event.payload)?.promptLength" class="detail-meta">
+                Length: {{ parsePayload(event.payload)?.promptLength }} characters
               </div>
             </div>
 
@@ -687,5 +699,10 @@ onUnmounted(() => {
 
 .empty-icon {
   font-size: 1.2rem;
+}
+
+.user-prompt {
+  border-left: 4px solid var(--accent-blue);
+  background: rgba(96, 165, 250, 0.1);
 }
 </style>

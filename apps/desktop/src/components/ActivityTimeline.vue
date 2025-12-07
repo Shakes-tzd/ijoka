@@ -23,11 +23,15 @@ const eventIcons: Record<string, string> = {
   SessionStart: '🚀',
   SessionEnd: '🏁',
   ToolUse: '🔧',
+  ToolCall: '🔧',
   FeatureStarted: '📝',
   FeatureCompleted: '✅',
   Error: '❌',
   Progress: '📊',
   TranscriptUpdated: '📄',
+  UserQuery: '💬',
+  AgentStop: '🛑',
+  SubagentStop: '🤖',
 }
 
 const agentColors: Record<string, string> = {
