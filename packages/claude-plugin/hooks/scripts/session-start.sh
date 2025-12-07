@@ -84,7 +84,8 @@ EOF
 }
 
 # Run in background to not block session start
-notify_server &
+# Redirect all output to /dev/null to prevent contaminating JSON stdout
+notify_server >/dev/null 2>&1 &
 
 # Load features and output context
 load_features
