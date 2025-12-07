@@ -251,7 +251,7 @@ def main():
     try:
         hook_input = json.load(sys.stdin)
     except json.JSONDecodeError:
-        print('{"continue": true}')
+        print(json.dumps({"event": hook_type, "continue": True}))
         return
 
     # Get session_id from hook input or environment
@@ -283,8 +283,8 @@ def main():
     elif hook_type == "UserPromptSubmit":
         handle_user_prompt_submit(hook_input, project_dir, session_id)
 
-    # Always continue
-    print('{"continue": true}')
+    # Always continue - include event field
+    print(json.dumps({"event": hook_type, "continue": True}))
 
 
 if __name__ == "__main__":

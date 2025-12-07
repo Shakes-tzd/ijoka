@@ -21,5 +21,5 @@ curl -s -X POST "${SYNC_SERVER}/sessions/end" \
         \"sessionId\": \"${SESSION_ID}\"
     }" --max-time 2 2>/dev/null || true
 
-# Output empty response (no blocking)
-echo '{"continue": true}'
+# Output response with event field
+echo '{"event": "SessionEnd", "continue": true}'

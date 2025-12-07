@@ -20,4 +20,10 @@ if [ -n "$MATCH_RESULT" ] && [ "$MATCH_EXIT" -eq 0 ]; then
 fi
 
 # Then run validation (for feature_list.json edits)
-echo "$INPUT" | uv run "$SCRIPT_DIR/validate-feature-edit.py"
+# If validation script fails, output a valid response
+VALIDATION_RESULT=$(echo "$INPUT" | uv run "$SCRIPT_DIR/validate-feature-edit.py" 2>/dev/null)
+if [ -n "$VALIDATION_RESULT" ]; then
+    echo "$VALIDATION_RESULT"
+else
+    echo '{"event": "PreToolUse", "decision": "approve"}'
+fi

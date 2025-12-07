@@ -76,7 +76,7 @@ def main():
     try:
         hook_input = json.load(sys.stdin)
     except json.JSONDecodeError:
-        print('{"decision": "approve"}')
+        print('{"event": "PreToolUse", "decision": "approve"}')
         return
 
     tool_name = hook_input.get("tool_name", "")
@@ -85,7 +85,7 @@ def main():
     # Only validate Write/Edit on feature_list.json
     file_path = tool_input.get("file_path", tool_input.get("path", ""))
     if not file_path.endswith("feature_list.json"):
-        print('{"decision": "approve"}')
+        print('{"event": "PreToolUse", "decision": "approve"}')
         return
 
     # For Write, validate the content directly
@@ -95,6 +95,7 @@ def main():
             features = json.loads(content)
         except json.JSONDecodeError as e:
             print(json.dumps({
+                "event": "PreToolUse",
                 "decision": "block",
                 "reason": f"Invalid JSON: {e}"
             }))
@@ -103,6 +104,7 @@ def main():
         valid, errors = validate_feature_structure(features)
         if not valid:
             print(json.dumps({
+                "event": "PreToolUse",
                 "decision": "block",
                 "reason": "Invalid feature structure:\n- " + "\n- ".join(errors)
             }))
@@ -116,6 +118,7 @@ def main():
                 ok, del_errors = check_no_deletions(old_features, features)
                 if not ok:
                     print(json.dumps({
+                        "event": "PreToolUse",
                         "decision": "block",
                         "reason": "Feature deletion not allowed:\n- " + "\n- ".join(del_errors)
                     }))
@@ -133,12 +136,13 @@ def main():
                 # Check for invalid boolean strings
                 if '"passes": "true"' in new_string or '"passes": "false"' in new_string:
                     print(json.dumps({
+                        "event": "PreToolUse",
                         "decision": "block",
                         "reason": "Invalid 'passes' value: must be boolean true/false, not string \"true\"/\"false\""
                     }))
                     return
 
-    print('{"decision": "approve"}')
+    print('{"event": "PreToolUse", "decision": "approve"}')
 
 
 if __name__ == "__main__":

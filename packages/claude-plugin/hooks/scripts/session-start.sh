@@ -53,6 +53,7 @@ load_features() {
             # Active feature exists - show it prominently
             cat << EOF
 {
+    "event": "SessionStart",
     "hookSpecificOutput": {
         "additionalContext": "## Active Feature\\n\\n**Currently Working On:** ${active_feature}\\n\\n**Progress:** ${completed}/${total} features complete (${percentage}%)\\n\\n**Important:** All tool calls in this session will be linked to this feature in AgentKanban.\\n\\n**BEFORE doing different work:** If the user's request relates to a DIFFERENT feature, you MUST update \`inProgress\` to the correct feature first. Use \`/set-feature\` or manually update feature_list.json.\\n\\n**When Done:**\\n1. Set \`inProgress: false\` and \`passes: true\` for the completed feature\\n2. Pick the next feature or run /next-feature"
     }
@@ -62,6 +63,7 @@ EOF
             # No active feature - show feature list and prompt to set one
             cat << EOF
 {
+    "event": "SessionStart",
     "hookSpecificOutput": {
         "additionalContext": "## No Active Feature - Action Required\\n\\n**Progress:** ${completed}/${total} features complete (${percentage}%)\\n\\n**Features:**\\n${feature_summary}\\n\\n**CRITICAL:** Before ANY work, identify which feature it relates to:\\n\\n1. **New feature work:** Run \`/next-feature\` or set \`inProgress: true\` on an incomplete feature\\n2. **Fix/enhance completed feature:** Either reopen it (set \`passes: false\`) or create a follow-up\\n3. **Unrelated work:** Create a new feature first\\n\\n**Commands:**\\n- \`/next-feature\` - Auto-select next incomplete feature\\n- \`/set-feature <name>\` - Activate specific feature (even completed ones)\\n- \`/add-feature\` - Create new feature\\n\\n**Why This Matters:** Tool calls are ONLY linked to features when one has \`inProgress: true\`. Match your work to the right feature!"
     }
@@ -72,6 +74,7 @@ EOF
         # No feature list - suggest creating one
         cat << EOF
 {
+    "event": "SessionStart",
     "hookSpecificOutput": {
         "additionalContext": "No feature_list.json found in this project. Consider creating one with /init-project command for structured task management."
     }
