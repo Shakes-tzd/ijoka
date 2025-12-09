@@ -26,7 +26,7 @@ interface AgentEvent {
   sessionId: string
   projectDir: string
   toolName?: string
-  payload?: string
+  payload?: string | object  // Can be string (SQLite) or object (Memgraph)
   createdAt: string
 }
 

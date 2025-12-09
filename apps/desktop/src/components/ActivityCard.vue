@@ -8,7 +8,7 @@ interface AgentEvent {
   sessionId: string
   projectDir: string
   toolName?: string
-  payload?: string
+  payload?: string | object  // Can be string (SQLite) or object (Memgraph)
   featureId?: string
   createdAt: string
 }
@@ -116,8 +116,12 @@ const agentColors: Record<string, string> = {
   'unknown': '#888',
 }
 
-function parsePayload(payload?: string): ParsedPayload | null {
+function parsePayload(payload?: string | object): ParsedPayload | null {
   if (!payload) return null
+  // Handle both string (from SQLite) and object (from Memgraph via serde_json::Value)
+  if (typeof payload === 'object') {
+    return payload as ParsedPayload
+  }
   try {
     return JSON.parse(payload)
   } catch {
@@ -137,7 +141,12 @@ function getAgentColor(agent: string): string {
 }
 
 function formatTime(dateStr: string): string {
-  const date = new Date(dateStr)
+  if (!dateStr) return '--:--'
+  // Memgraph returns timestamps like "2025-12-09T12:41:19.672765+00:00[Etc/UTC]"
+  // Remove the [timezone] suffix that JS Date can't parse
+  const cleanedStr = dateStr.replace(/\[.*\]$/, '')
+  const date = new Date(cleanedStr)
+  if (isNaN(date.getTime())) return '--:--'
   return date.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',

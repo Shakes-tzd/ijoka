@@ -22,7 +22,7 @@ interface AgentEvent {
   sessionId: string
   projectDir: string
   toolName?: string
-  payload?: string
+  payload?: string | object
   featureId?: string
   createdAt: string
 }
@@ -94,8 +94,12 @@ interface ParsedPayload {
   [key: string]: unknown
 }
 
-function parsePayload(payload?: string): ParsedPayload | null {
+function parsePayload(payload?: string | object): ParsedPayload | null {
   if (!payload) return null
+  // Handle both string (from SQLite) and object (from Memgraph)
+  if (typeof payload === 'object') {
+    return payload as ParsedPayload
+  }
   try {
     return JSON.parse(payload)
   } catch {

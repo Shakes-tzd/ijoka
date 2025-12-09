@@ -10,7 +10,7 @@ interface AgentEvent {
   sessionId: string
   projectDir: string
   toolName?: string
-  payload?: string
+  payload?: string | object
   featureId?: string
   createdAt: string
 }
