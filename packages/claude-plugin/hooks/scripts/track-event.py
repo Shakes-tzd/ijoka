@@ -4,10 +4,10 @@
 # dependencies = ["neo4j>=5.0"]
 # ///
 """
-Ijoka Event Tracker (SQLite Version)
+Ijoka Event Tracker
 
 Unified script for tracking tool calls, stops, and subagent events.
-Writes directly to SQLite database (no HTTP server needed).
+Writes to Memgraph (graph database) as single source of truth.
 Links events to the active feature.
 """
 

@@ -330,18 +330,21 @@ onUnmounted(() => {
     <div class="main-wrapper">
       <!-- Project Tabs (show when projects are open) -->
       <div class="project-tabs" v-if="openProjects.length > 0">
-        <button
+        <div
           v-for="project in openProjects"
           :key="project"
           class="tab"
           :class="{ active: selectedProject === project }"
           @click="selectProject(project)"
+          role="tab"
+          tabindex="0"
+          @keydown.enter="selectProject(project)"
         >
           <span>{{ getProjectName(project) }}</span>
-          <button class="tab-close" @click="closeProjectTab(project, $event)" title="Close">
+          <button class="tab-close" @click.stop="closeProjectTab(project, $event)" title="Close">
             <ToolIcon name="x-circle" :size="12" />
           </button>
-        </button>
+        </div>
       </div>
 
       <!-- Main Content -->

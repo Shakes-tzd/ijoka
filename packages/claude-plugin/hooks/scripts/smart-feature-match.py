@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.9"
-# dependencies = []
+# dependencies = ["neo4j>=5.0"]
 # ///
 """
 Smart Feature Matching - Lightweight Version (No AI Subprocess)
@@ -14,6 +14,8 @@ This is the deterministic approach:
 2. UserPromptSubmit: Classify once per user message (lightweight keywords)
 3. PreToolUse: Use cached state, no classification
 4. PostToolUse: Track work against active feature
+
+NOTE: Uses Memgraph (graph_db_helper) as single source of truth.
 """
 
 import json
@@ -21,9 +23,9 @@ import os
 import sys
 from pathlib import Path
 
-# Import shared database helper
+# Import shared database helper (Memgraph)
 sys.path.insert(0, str(Path(__file__).parent))
-import db_helper
+import graph_db_helper as db_helper
 
 
 def main():
