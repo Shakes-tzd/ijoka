@@ -1,10 +1,10 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.9"
-# dependencies = []
+# dependencies = ["neo4j>=5.0"]
 # ///
 """
-AgentKanban Event Tracker (SQLite Version)
+Ijoka Event Tracker (SQLite Version)
 
 Unified script for tracking tool calls, stops, and subagent events.
 Writes directly to SQLite database (no HTTP server needed).
@@ -18,7 +18,7 @@ from pathlib import Path
 
 # Import shared database helper
 sys.path.insert(0, str(Path(__file__).parent))
-import db_helper
+import graph_db_helper as db_helper
 
 
 def extract_file_paths(tool_input: dict) -> list[str]:
@@ -55,6 +55,16 @@ def summarize_input(tool_name: str, tool_input: dict) -> str:
         return f"Grep: {tool_input.get('pattern', 'unknown')}"
     elif tool_name == "Task":
         return f"Task: {tool_input.get('description', 'unknown')}"
+    elif tool_name.startswith("mcp__ijoka__"):
+        # MCP ijoka tools - extract the action name
+        action = tool_name.replace("mcp__ijoka__", "")
+        # Include key parameters for context
+        if "description" in tool_input:
+            return f"ijoka.{action}: {tool_input['description'][:50]}"
+        elif "feature_id" in tool_input:
+            return f"ijoka.{action}: {tool_input['feature_id']}"
+        else:
+            return f"ijoka.{action}"
     else:
         return f"{tool_name}: {str(tool_input)[:60]}"
 
@@ -159,15 +169,25 @@ def _activate_next_feature(project_dir: str) -> str | None:
     return None
 
 
+def is_mcp_meta_tool(tool_name: str) -> bool:
+    """Check if a tool call is an MCP ijoka meta tool (feature/project management)."""
+    # MCP tools follow the pattern: mcp__<server>__<tool_name>
+    return tool_name.startswith("mcp__ijoka__")
+
+
 def is_diagnostic_command(tool_name: str, tool_input: dict) -> bool:
     """Check if a tool call is a diagnostic/meta command that shouldn't be feature-attributed."""
+    # MCP ijoka tools are meta/management tools
+    if is_mcp_meta_tool(tool_name):
+        return True
+
     if tool_name == "Bash":
         cmd = tool_input.get("command", "").lower()
-        # SQLite queries to agentkanban database
-        if "agentkanban" in cmd and "sqlite3" in cmd:
+        # SQLite queries to ijoka database
+        if "ijoka" in cmd and "sqlite3" in cmd:
             return True
         # Generic database inspection
-        if any(x in cmd for x in [".agentkanban", "session_state", "sessions", "features"]) and "select" in cmd:
+        if any(x in cmd for x in [".ijoka", "session_state", "sessions", "features"]) and "select" in cmd:
             return True
         # Hook debugging/verification
         if "hook" in cmd and any(x in cmd for x in ["cat", "tail", "head", "grep"]):
@@ -175,33 +195,87 @@ def is_diagnostic_command(tool_name: str, tool_input: dict) -> bool:
     elif tool_name == "Read":
         file_path = tool_input.get("file_path", "").lower()
         # Reading hook scripts or logs
-        if ".agentkanban" in file_path or "hook" in file_path:
+        if ".ijoka" in file_path or "hook" in file_path:
             return True
     return False
 
 
-def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str):
-    """Handle PostToolUse events - track all tool calls."""
+def generate_workflow_nudges(
+    tool_name: str,
+    tool_input: dict,
+    tool_result: dict,
+    project_dir: str,
+    session_id: str,
+    active_feature: dict | None
+) -> list[str]:
+    """
+    Generate workflow nudges based on current work patterns.
+    Returns list of nudge messages to include in hook response.
+    """
+    nudges = []
+
+    # Skip nudges for meta tools
+    if is_mcp_meta_tool(tool_name) or is_diagnostic_command(tool_name, tool_input):
+        return nudges
+
+    # 1. Commit frequency nudge (after 5+ file changes)
+    if tool_name in ("Edit", "Write"):
+        try:
+            work_stats = db_helper.get_work_since_last_commit(session_id, project_dir)
+            if work_stats["work_count"] >= 5 and not db_helper.has_been_nudged(session_id, "commit_reminder"):
+                nudges.append(f"💡 You've made {work_stats['work_count']} file changes. Consider committing your progress.")
+                db_helper.record_nudge(session_id, "commit_reminder")
+        except Exception:
+            pass  # Don't fail the hook for nudge errors
+
+    # 2. Feature completion nudge (after successful test/build)
+    if tool_name == "Bash" and active_feature:
+        cmd = tool_input.get("command", "").lower()
+        is_error = tool_result.get("is_error", False)
+
+        is_test_or_build = any(x in cmd for x in ["test", "pytest", "jest", "vitest", "build", "cargo build", "pnpm build"])
+
+        if is_test_or_build and not is_error:
+            if not db_helper.has_been_nudged(session_id, "feature_completion"):
+                desc = active_feature.get("description", "")[:30]
+                nudges.append(f"✅ Tests/build passed! If '{desc}...' is complete, use `ijoka_complete_feature`.")
+                db_helper.record_nudge(session_id, "feature_completion")
+
+    return nudges
+
+
+def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) -> list[str]:
+    """Handle PostToolUse events - track all tool calls. Returns workflow nudges."""
     tool_name = hook_input.get("tool_name", "unknown")
     tool_input = hook_input.get("tool_input", {})
     tool_result = hook_input.get("tool_result", {})
 
     # Skip tracking the tracking script itself
     if "track-event.py" in str(tool_input) or "db_helper" in str(tool_input):
-        return
+        return []
 
-    # Check if this is a diagnostic command (shouldn't be feature-attributed)
+    # Check if this is a diagnostic/meta command
     is_diagnostic = is_diagnostic_command(tool_name, tool_input)
+    is_meta_tool = is_mcp_meta_tool(tool_name)
 
-    # Get active feature from database (only if not diagnostic)
-    active_feature = None if is_diagnostic else db_helper.get_active_feature(project_dir)
+    # Get the appropriate feature for this activity
+    if is_meta_tool:
+        # MCP ijoka tools go to the Session Work pseudo-feature
+        active_feature = db_helper.get_or_create_session_work_feature(project_dir)
+    elif is_diagnostic:
+        # Other diagnostic commands don't get attributed to any feature
+        active_feature = None
+    else:
+        # Normal tools get attributed to the active feature
+        active_feature = db_helper.get_active_feature(project_dir)
 
     # Build detailed payload based on tool type
     payload = {
         "filePaths": extract_file_paths(tool_input),
         "inputSummary": summarize_input(tool_name, tool_input),
         "success": not tool_result.get("is_error", False),
-        "isDiagnostic": is_diagnostic
+        "isDiagnostic": is_diagnostic,
+        "isMetaTool": is_meta_tool
     }
 
     # Add tool-specific details
@@ -271,6 +345,13 @@ def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str):
             payload=completion_payload,
             feature_id=feature_id
         )
+
+    # Generate workflow nudges
+    nudges = generate_workflow_nudges(
+        tool_name, tool_input, tool_result,
+        project_dir, session_id, active_feature
+    )
+    return nudges
 
 
 def handle_stop(hook_input: dict, project_dir: str, session_id: str):
@@ -453,7 +534,7 @@ def handle_user_prompt_submit(hook_input: dict, project_dir: str, session_id: st
 
 
 def main():
-    hook_type = os.environ.get("AGENTKANBAN_HOOK_TYPE", "PostToolUse")
+    hook_type = os.environ.get("IJOKA_HOOK_TYPE", "PostToolUse")
 
     try:
         hook_input = json.load(sys.stdin)
@@ -463,32 +544,39 @@ def main():
 
     # Debug: log the hook input to see what session_id we're getting
     import sys as _sys
-    debug_log = Path.home() / ".agentkanban" / "hook_debug.log"
+    debug_log = Path.home() / ".ijoka" / "hook_debug.log"
     with open(debug_log, "a") as f:
         f.write(f"\n=== {hook_type} at {__import__('datetime').datetime.now()} ===\n")
         f.write(f"hook_input keys: {list(hook_input.keys())}\n")
         f.write(f"session_id from input: {hook_input.get('session_id')}\n")
         f.write(f"CLAUDE_SESSION_ID env: {os.environ.get('CLAUDE_SESSION_ID')}\n")
+        if hook_type == "PostToolUse":
+            tool_name = hook_input.get("tool_name", "unknown")
+            f.write(f"tool_name: {tool_name}\n")
+            f.write(f"is_mcp_meta_tool: {is_mcp_meta_tool(tool_name)}\n")
 
     session_id = hook_input.get("session_id") or os.environ.get("CLAUDE_SESSION_ID", "unknown")
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "")
 
     if not project_dir:
+        # Try to detect project from file path by looking for common project markers
         tool_input = hook_input.get("tool_input", {})
         file_path = tool_input.get("file_path", "")
         if file_path:
             path = Path(file_path)
             for parent in [path] + list(path.parents):
-                if (parent / "feature_list.json").exists():
+                # Check for common project markers (git, package.json, Cargo.toml, etc.)
+                if any((parent / marker).exists() for marker in [".git", "package.json", "Cargo.toml", "pyproject.toml", "CLAUDE.md"]):
                     project_dir = str(parent)
                     break
 
     if not project_dir:
         project_dir = os.getcwd()
 
-    # Route to appropriate handler
+    # Route to appropriate handler and collect nudges
+    nudges = []
     if hook_type == "PostToolUse":
-        handle_post_tool_use(hook_input, project_dir, session_id)
+        nudges = handle_post_tool_use(hook_input, project_dir, session_id) or []
     elif hook_type == "Stop":
         handle_stop(hook_input, project_dir, session_id)
     elif hook_type == "SubagentStop":
@@ -496,7 +584,12 @@ def main():
     elif hook_type == "UserPromptSubmit":
         handle_user_prompt_submit(hook_input, project_dir, session_id)
 
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": hook_type}}))
+    # Build response with optional nudges
+    response = {"hookSpecificOutput": {"hookEventName": hook_type}}
+    if nudges:
+        response["hookSpecificOutput"]["additionalContext"] = "\n".join(nudges)
+
+    print(json.dumps(response))
 
 
 if __name__ == "__main__":

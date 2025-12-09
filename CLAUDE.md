@@ -1,13 +1,13 @@
-# CLAUDE.md - AgentKanban Development Guide
+# CLAUDE.md - Ijoka Development Guide
 
 ## Project Overview
 
-**AgentKanban** is a unified observability and task management system for AI coding agents. It implements [Anthropic's long-running agent pattern](https://www.anthropic.com/engineering/claude-code-best-practices) with a Tauri desktop app and Claude Code plugin.
+**Ijoka** (Zulu for "yoke") is a unified observability and orchestration system for AI coding agents. It implements [Anthropic's long-running agent pattern](https://www.anthropic.com/engineering/claude-code-best-practices) with a Tauri desktop app and Claude Code plugin - yoking AI agents together for coordinated work.
 
 ## Architecture
 
 ```
-agentkanban/
+ijoka/
 ├── apps/desktop/          # Tauri app (Rust + Vue 3)
 │   ├── src-tauri/         # Rust backend
 │   │   ├── src/
@@ -34,7 +34,9 @@ agentkanban/
 | Desktop Framework | Tauri 2.x |
 | Backend | Rust (rusqlite, axum, notify, tokio) |
 | Frontend | Vue 3 + TypeScript + Vite |
-| Database | SQLite (embedded) |
+| Graph Database | Memgraph (source of truth) |
+| Local Cache | SQLite (embedded, synced from graph) |
+| MCP Server | TypeScript (packages/mcp-server) |
 | Plugin | Claude Code hooks/commands/skills |
 
 ## Development Commands
@@ -78,27 +80,52 @@ cd packages/claude-plugin && claude /plugin install .
 - **commands/** - Slash command definitions
 - **skills/** - SKILL.md for feature workflow
 
-## Feature List Pattern
+## Data Architecture
 
-This project uses `feature_list.json` for task management:
+**Single Source of Truth: Memgraph (Graph Database)**
 
-```json
-[
-  {
-    "category": "functional",
-    "description": "What the feature does",
-    "steps": ["How to verify it works"],
-    "passes": false
-  }
-]
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    IJOKA DATA ARCHITECTURE                       │
+│                                                                  │
+│                    ┌──────────────────┐                          │
+│                    │   MEMGRAPH       │ ◄── SOURCE OF TRUTH      │
+│                    │   (Graph DB)     │     bolt://localhost:7687│
+│                    │                  │                          │
+│                    │  • Features      │                          │
+│                    │  • Sessions      │                          │
+│                    │  • Events        │                          │
+│                    │  • StatusEvents  │                          │
+│                    └────────┬─────────┘                          │
+│                             │                                    │
+│         ┌───────────────────┼───────────────────┐                │
+│         │                   │                   │                │
+│         ▼                   ▼                   ▼                │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐       │
+│  │ SQLite       │    │  Tauri UI    │    │    MCP       │       │
+│  │ (local cache)│    │  (reads DB)  │    │   Server     │       │
+│  └──────────────┘    └──────────────┘    └──────────────┘       │
+│                                                                  │
+│  ⚠️ feature_list.json is DEPRECATED - do not use               │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-**Rules:**
-1. Pick ONE feature where `passes: false`
-2. Set `inProgress: true` while working
-3. Complete and test thoroughly
-4. Set `passes: true` when done
-5. NEVER remove or edit existing features
+**Feature Management via MCP Tools:**
+- `ijoka_status` - Get current project status and active feature
+- `ijoka_start_feature` - Start working on a feature
+- `ijoka_complete_feature` - Mark feature as complete
+- `ijoka_block_feature` - Mark feature as blocked
+- `ijoka_create_feature` - Create a new feature
+- `ijoka_record_insight` - Record a reusable insight
+
+**Validation:**
+```bash
+# Run graph database validation
+uv run packages/claude-plugin/hooks/scripts/graph_validator.py
+
+# Auto-fix issues
+uv run packages/claude-plugin/hooks/scripts/graph_validator.py --fix
+```
 
 ## Code Style
 
@@ -132,13 +159,27 @@ The scaffold is complete. Development priorities:
 ## Useful Context
 
 - HTTP server runs on `http://127.0.0.1:4000`
-- Database stored in app data directory
-- File watcher monitors `~/.claude/projects` and configured project dirs
+- Memgraph runs on `bolt://localhost:7687` (Docker)
+- SQLite cache stored at `~/.ijoka/ijoka.db`
 - Events broadcast to frontend via Tauri events
 
 ## When Starting a Session
 
-1. Check `feature_list.json` for current progress
+1. Ensure Memgraph is running: `docker compose up -d`
 2. Run `pnpm dev` to start the app
-3. Pick ONE incomplete feature to work on
-4. Test thoroughly before marking complete
+3. Use `ijoka_status` MCP tool to see current feature
+4. Work on the active feature
+5. Use `ijoka_complete_feature` when done
+
+## Infrastructure
+
+```bash
+# Start Memgraph
+docker compose up -d
+
+# Check Memgraph status
+docker compose ps
+
+# View Memgraph logs
+docker compose logs memgraph
+```

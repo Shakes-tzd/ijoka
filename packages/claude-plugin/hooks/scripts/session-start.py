@@ -1,13 +1,18 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.9"
-# dependencies = []
+# dependencies = ["neo4j>=5.0"]
 # ///
 """
-AgentKanban Session Start Hook (SQLite Version)
+Ijoka Session Start Hook
 
-Records session start in database and provides feature context to Claude.
-Imports features from feature_list.json if not already in database.
+Records session start in graph database and provides feature context to Claude.
+Runs quick diagnostics to catch configuration issues early.
+
+Architecture:
+- Memgraph = Single source of truth
+- MCP tools = Feature management interface
+- feature_list.json = DEPRECATED (no longer used)
 """
 
 import json
@@ -17,7 +22,39 @@ from pathlib import Path
 
 # Import shared database helper
 sys.path.insert(0, str(Path(__file__).parent))
-import db_helper
+import graph_db_helper as db_helper
+
+
+def run_quick_diagnostics(project_dir: str) -> list[str]:
+    """Run quick diagnostic checks and return any warnings."""
+    warnings = []
+
+    try:
+        # Check for unmigrated feature_list.json
+        feature_list_path = Path(project_dir) / "feature_list.json"
+        if feature_list_path.exists():
+            warnings.append("⚠️ Unmigrated feature_list.json found. Run `/ijoka:migrate` to import features to graph DB.")
+
+        # Ensure Session Work feature exists
+        results = db_helper.run_query("""
+            MATCH (f:Feature {is_session_work: true})-[:BELONGS_TO]->(p:Project {path: $projectPath})
+            RETURN f.status as status
+        """, {"projectPath": project_dir})
+        if not results:
+            db_helper.get_or_create_session_work_feature(project_dir)
+
+        # Check for relationship consistency issues
+        results = db_helper.run_query("""
+            MATCH (e:Event)-[r:BELONGS_TO]->(f:Feature)
+            RETURN count(r) as count
+        """)
+        if results and results[0]['count'] > 0:
+            warnings.append(f"⚠️ {results[0]['count']} events have incorrect relationships. Run `graph_validator.py --fix`")
+
+    except Exception as e:
+        warnings.append(f"⚠️ Diagnostic: {e}")
+
+    return warnings
 
 
 def output_response(context: str) -> None:
@@ -39,6 +76,9 @@ def main():
     session_id = hook_input.get("session_id") or os.environ.get("CLAUDE_SESSION_ID", "unknown")
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
 
+    # Run quick diagnostics
+    diagnostic_warnings = run_quick_diagnostics(project_dir)
+
     # Record session start in database
     db_helper.start_session(session_id, "claude-code", project_dir)
 
@@ -48,25 +88,14 @@ def main():
         source_agent="claude-code",
         session_id=session_id,
         project_dir=project_dir,
-        payload={"action": "session_started"}
+        payload={"action": "session_started", "diagnostics": diagnostic_warnings}
     )
 
-    # Get features from database
+    # Get features from graph database (single source of truth)
     features = db_helper.get_features(project_dir)
 
-    # If no features in database, try to import from JSON (backward compatibility)
     if not features:
-        feature_file = Path(project_dir) / "feature_list.json"
-        if feature_file.exists():
-            try:
-                json_features = json.loads(feature_file.read_text())
-                db_helper.sync_features_from_json(project_dir, json_features)
-                features = db_helper.get_features(project_dir)
-            except (json.JSONDecodeError, IOError):
-                pass
-
-    if not features:
-        output_response("No feature_list.json found in this project. Consider creating one with /init-project command for structured task management.")
+        output_response("No features found in graph database. Use ijoka_create_feature MCP tool or import from ijoka-implementation-plan.yaml.")
         return
 
     # Calculate stats
@@ -80,6 +109,11 @@ def main():
         if f.get("inProgress"):
             active_feature = f
             break
+
+    # Build diagnostic section if there are warnings
+    diagnostic_section = ""
+    if diagnostic_warnings:
+        diagnostic_section = "\n---\n\n## Diagnostics\n\n" + "\n".join(diagnostic_warnings) + "\n"
 
     if active_feature:
         # Active feature exists - show it with auto-completion info
@@ -101,8 +135,7 @@ All tool calls will be linked to this feature. Features auto-complete when crite
 ---
 
 **Switching features:** The system auto-detects when you're working on a different feature and switches automatically based on AI classification.
-
----"""
+{diagnostic_section}"""
         output_response(context)
     else:
         # No active feature - show summary
@@ -128,7 +161,8 @@ All tool calls will be linked to this feature. Features auto-complete when crite
 
 **Manual Commands (optional):**
 - `/next-feature` - Manually select next feature
-- `/complete-feature` - Force complete active feature"""
+- `/complete-feature` - Force complete active feature
+{diagnostic_section}"""
         output_response(context)
 
 

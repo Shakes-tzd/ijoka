@@ -1,0 +1,232 @@
+[
+  {
+    "category": "infrastructure",
+    "description": "Verify Tauri app builds and runs successfully",
+    "steps": [
+      "Run pnpm install to install dependencies",
+      "Run pnpm dev to start development server",
+      "Verify window opens with Ijoka title",
+      "Verify system tray icon appears"
+    ],
+    "passes": false,
+    "inProgress": false,
+    "workCount": 16
+  },
+  {
+    "category": "functional",
+    "description": "SQLite database initializes correctly on app start",
+    "steps": [
+      "Start the app with pnpm dev",
+      "Check that database file is created in app data directory",
+      "Verify tables are created (events, features, sessions, config)"
+    ],
+    "passes": true,
+    "inProgress": false
+  },
+  {
+    "category": "functional",
+    "description": "HTTP server accepts and stores events from hooks",
+    "steps": [
+      "POST a test event to http://127.0.0.1:4000/events",
+      "Verify 200 OK response",
+      "Check event broadcasts to frontend"
+    ],
+    "passes": true,
+    "inProgress": false
+  },
+  {
+    "category": "functional",
+    "description": "File watcher detects feature_list.json changes",
+    "steps": [
+      "Modify feature_list.json in watched directory",
+      "Verify watcher detects the change",
+      "Check features sync to database"
+    ],
+    "passes": true,
+    "inProgress": false
+  },
+  {
+    "category": "ui",
+    "description": "Kanban board displays features in correct columns",
+    "steps": [
+      "Verify To Do column shows passes:false, inProgress:false",
+      "Verify In Progress column shows inProgress:true",
+      "Verify Done column shows passes:true"
+    ],
+    "passes": true,
+    "inProgress": false
+  },
+  {
+    "category": "ui",
+    "description": "Activity timeline shows real-time events",
+    "steps": [
+      "Send events via HTTP API",
+      "Verify events appear in timeline immediately",
+      "Verify timestamps format properly"
+    ],
+    "passes": true,
+    "inProgress": false
+  },
+  {
+    "category": "ui",
+    "description": "Stats bar shows accurate progress metrics",
+    "steps": [
+      "Verify total count is correct",
+      "Verify completed count matches passes:true",
+      "Verify percentage calculation"
+    ],
+    "passes": true,
+    "inProgress": false
+  },
+  {
+    "category": "functional",
+    "description": "System tray menu works correctly",
+    "steps": [
+      "Click tray icon to show/hide window",
+      "Test Show Dashboard menu item",
+      "Test Quit menu item"
+    ],
+    "passes": true,
+    "inProgress": false
+  },
+  {
+    "category": "functional",
+    "description": "Desktop notifications work for feature completion",
+    "steps": [
+      "Trigger a feature completion event",
+      "Verify native notification appears"
+    ],
+    "passes": false,
+    "inProgress": false,
+    "workCount": 4
+  },
+  {
+    "category": "functional",
+    "description": "Scan Projects discovers feature_list.json files",
+    "steps": [
+      "Trigger Scan Projects from tray menu",
+      "Verify project is discovered"
+    ],
+    "passes": false,
+    "inProgress": false,
+    "workCount": 1
+  },
+  {
+    "category": "infrastructure",
+    "description": "Claude plugin installs and hooks work",
+    "steps": [
+      "Run claude /plugin install . in packages/claude-plugin",
+      "Start a Claude Code session",
+      "Verify session-start hook fires"
+    ],
+    "passes": false,
+    "inProgress": true,
+    "workCount": 12
+  },
+  {
+    "category": "documentation",
+    "description": "README includes complete setup instructions",
+    "steps": [
+      "Review README.md for accuracy",
+      "Verify prerequisites are listed"
+    ],
+    "passes": true,
+    "inProgress": false
+  },
+  {
+    "category": "functional",
+    "description": "Different projects have their own separate kanban boards",
+    "steps": [
+      "Add project selector dropdown in the UI header",
+      "Filter kanban board to show only selected project's features"
+    ],
+    "passes": false,
+    "inProgress": false,
+    "workCount": 2
+  },
+  {
+    "category": "functional",
+    "description": "Tool calls are linked to active feature in Activity History",
+    "steps": [
+      "Verify ToolCall events include correct featureId",
+      "Verify Activity History shows linked tool calls"
+    ],
+    "passes": true,
+    "inProgress": false
+  },
+  {
+    "category": "ui",
+    "description": "Enhanced tool call and feature details display",
+    "steps": [
+      "Display inputSummary, filePaths, success status",
+      "Add visual indicators for success/failure"
+    ],
+    "passes": false,
+    "inProgress": false,
+    "workCount": 11
+  },
+  {
+    "category": "ui",
+    "description": "Fix empty events and improve activity card display",
+    "steps": [
+      "Filter out empty TranscriptUpdated events",
+      "Show feature description instead of path:index",
+      "Only create features for constructive tools (Edit, Write, Task)",
+      "Add deduplication for auto-created features"
+    ],
+    "passes": false,
+    "inProgress": false,
+    "workCount": 33,
+    "completionCriteria": {
+      "type": "build",
+      "description": "Build must pass",
+      "success_required": true
+    }
+  },
+  {
+    "category": "ui",
+    "description": "Support unlinked activities and session-based observability",
+    "steps": [
+      "Add UI section for unlinked/session activities",
+      "Filter activity history by feature work period",
+      "Allow viewing all session events regardless of feature"
+    ],
+    "passes": false,
+    "inProgress": false
+  },
+  {
+    "category": "functional",
+    "description": "Enhance session-end.sh functionality",
+    "steps": [
+      "Verify changes in session-end.sh work correctly",
+      "Run /complete-feature when done"
+    ],
+    "passes": true,
+    "inProgress": false,
+    "workCount": 3,
+    "completionCriteria": {
+      "type": "work_count",
+      "count": 3,
+      "description": "Auto-complete after sustained work",
+      "success_required": true
+    }
+  },
+  {
+    "category": "functional",
+    "description": "Research Claude OTEL metrics",
+    "steps": [
+      "Review agent task results",
+      "Verify the subtask was completed successfully",
+      "Run /complete-feature when done"
+    ],
+    "passes": false,
+    "inProgress": false,
+    "workCount": 0,
+    "completionCriteria": {
+      "type": "work_count",
+      "count": 3,
+      "description": "Auto-complete after sustained work",
+      "success_required": true
+    }
+  }
+]
