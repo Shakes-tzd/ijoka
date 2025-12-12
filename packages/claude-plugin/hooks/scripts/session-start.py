@@ -198,8 +198,13 @@ def get_recent_feature_commits(feature_id: str) -> Optional[str]:
         return None
 
 
-def output_response(context: str) -> None:
-    """Output JSON response with context."""
+def output_response(context: str, status_summary: str = None) -> None:
+    """Output JSON response with context and optional terminal notification."""
+    # Print status summary to stderr (visible in terminal)
+    if status_summary:
+        import sys
+        print(f"\n📊 {status_summary}\n💡 Say 'hi' or 'status' to get a full update from Claude\n", file=sys.stderr)
+
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
@@ -326,7 +331,17 @@ After completing the current feature, these are queued:
             context_parts.append(diagnostic_section)
 
         context = "\n\n---\n\n".join(context_parts)
-        output_response(context)
+
+        # Build terminal status summary
+        step_info = ""
+        if step_progress:
+            steps = db_helper.get_steps(active_feature["id"])
+            if steps:
+                done = sum(1 for s in steps if s.get("status") == "completed")
+                step_info = f" | Steps: {done}/{len(steps)}"
+
+        status_summary = f"Feature: {active_feature['description'][:50]} | Progress: {completed}/{total} ({percentage}%){step_info}"
+        output_response(context, status_summary)
     else:
         # No active feature - show summary and ask user what to work on
         pending_features = [f for f in features if not f.get("passes")]
@@ -372,7 +387,9 @@ When you start working, the system will:
 - Auto-create a new feature if no match found
 - Auto-complete features when criteria are met
 {diagnostic_section}"""
-        output_response(context)
+        pending_count = len(pending_features)
+        status_summary = f"No active feature | Progress: {completed}/{total} ({percentage}%) | {pending_count} pending"
+        output_response(context, status_summary)
 
 
 if __name__ == "__main__":
