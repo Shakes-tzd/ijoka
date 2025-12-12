@@ -150,6 +150,18 @@ export interface Insight {
   effectiveness_score?: number;
 }
 
+export interface Step {
+  id: string;
+  feature_id: string;
+  description: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'skipped';
+  step_order: number;
+  expected_tools?: string[];
+  created_at?: string;
+  started_at?: string;
+  completed_at?: string;
+}
+
 export interface ProjectStats {
   total: number;
   pending: number;
@@ -210,6 +222,23 @@ function nodeToInsight(node: Record<string, unknown>): Insight {
     created_at: i.created_at?.toString(),
     usage_count: Number(i.usage_count) || 0,
     effectiveness_score: i.effectiveness_score as number | undefined,
+  };
+}
+
+function nodeToStep(node: Record<string, unknown>): Step {
+  const rawNode = node.s as Record<string, unknown>;
+  // Handle both direct properties and properties object from neo4j-driver
+  const s = (rawNode?.properties as Record<string, unknown>) || rawNode || {};
+  return {
+    id: s.id as string,
+    feature_id: s.feature_id as string,
+    description: s.description as string,
+    status: s.status as Step['status'],
+    step_order: Number(s.step_order) || 0,
+    expected_tools: s.expected_tools as string[] | undefined,
+    created_at: s.created_at?.toString(),
+    started_at: s.started_at?.toString(),
+    completed_at: s.completed_at?.toString(),
   };
 }
 
@@ -529,6 +558,139 @@ export async function getBlockedFeatures(projectPath: string): Promise<Feature[]
     { projectPath }
   );
   return results.map(nodeToFeature);
+}
+
+export async function getFeatureById(featureId: string): Promise<Feature | null> {
+  const results = await runQuery<Record<string, unknown>>(
+    'MATCH (f:Feature {id: $featureId}) RETURN f',
+    { featureId }
+  );
+  return results.length > 0 ? nodeToFeature(results[0]) : null;
+}
+
+// =============================================================================
+// STEP OPERATIONS
+// =============================================================================
+
+export async function createStep(
+  featureId: string,
+  description: string,
+  order: number,
+  status: string = 'pending'
+): Promise<Step> {
+  const id = randomUUID();
+  const results = await runWriteQuery<Record<string, unknown>>(
+    `
+    MATCH (f:Feature {id: $featureId})
+    CREATE (s:Step {
+      id: $id,
+      feature_id: $featureId,
+      description: $description,
+      status: $status,
+      step_order: $order,
+      created_at: datetime()
+    })-[:BELONGS_TO]->(f)
+    RETURN s
+    `,
+    { featureId, id, description, status, order }
+  );
+
+  return nodeToStep(results[0]);
+}
+
+export async function getSteps(featureId: string): Promise<Step[]> {
+  const results = await runQuery<Record<string, unknown>>(
+    `
+    MATCH (s:Step)-[:BELONGS_TO]->(f:Feature {id: $featureId})
+    RETURN s
+    ORDER BY s.step_order ASC
+    `,
+    { featureId }
+  );
+
+  return results.map(nodeToStep);
+}
+
+export async function getActiveStep(featureId: string): Promise<Step | null> {
+  // First try in_progress
+  let results = await runQuery<Record<string, unknown>>(
+    `
+    MATCH (s:Step)-[:BELONGS_TO]->(f:Feature {id: $featureId})
+    WHERE s.status = 'in_progress'
+    RETURN s
+    ORDER BY s.step_order ASC
+    LIMIT 1
+    `,
+    { featureId }
+  );
+
+  if (results.length > 0) {
+    return nodeToStep(results[0]);
+  }
+
+  // Fall back to first pending
+  results = await runQuery<Record<string, unknown>>(
+    `
+    MATCH (s:Step)-[:BELONGS_TO]->(f:Feature {id: $featureId})
+    WHERE s.status = 'pending'
+    RETURN s
+    ORDER BY s.step_order ASC
+    LIMIT 1
+    `,
+    { featureId }
+  );
+
+  return results.length > 0 ? nodeToStep(results[0]) : null;
+}
+
+export async function updateStepStatus(stepId: string, status: string): Promise<Step | null> {
+  const timeField =
+    status === 'in_progress' ? 'started_at' : status === 'completed' ? 'completed_at' : null;
+
+  const setClauses = ['s.status = $status'];
+  if (timeField) {
+    setClauses.push(`s.${timeField} = datetime()`);
+  }
+
+  const results = await runWriteQuery<Record<string, unknown>>(
+    `
+    MATCH (s:Step {id: $stepId})
+    SET ${setClauses.join(', ')}
+    RETURN s
+    `,
+    { stepId, status }
+  );
+
+  return results.length > 0 ? nodeToStep(results[0]) : null;
+}
+
+export async function syncStepsFromArray(featureId: string, stepDescriptions: string[]): Promise<Step[]> {
+  const existingSteps = await getSteps(featureId);
+  const existingByDesc = new Map(existingSteps.map((s) => [s.description, s]));
+
+  const steps: Step[] = [];
+
+  for (let i = 0; i < stepDescriptions.length; i++) {
+    const desc = stepDescriptions[i];
+    const existing = existingByDesc.get(desc);
+
+    if (existing) {
+      steps.push(existing);
+    } else {
+      const step = await createStep(featureId, desc, i);
+      steps.push(step);
+    }
+  }
+
+  // Mark steps not in new list as skipped
+  const newDescs = new Set(stepDescriptions);
+  for (const step of existingSteps) {
+    if (!newDescs.has(step.description)) {
+      await updateStepStatus(step.id, 'skipped');
+    }
+  }
+
+  return steps;
 }
 
 // =============================================================================
