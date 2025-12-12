@@ -1037,6 +1037,112 @@ def has_been_nudged(session_id: str, nudge_type: str) -> bool:
 
 
 # =============================================================================
+# Stuckness Detection Functions
+# =============================================================================
+
+def get_last_meaningful_event(session_id: str) -> Optional[dict]:
+    """Get the last event that indicates real progress (Edit, Write with success)."""
+    results = run_query("""
+        MATCH (e:Event)-[:TRIGGERED_BY]->(s:Session {id: $sessionId})
+        WHERE e.tool_name IN ['Edit', 'Write']
+        AND e.success = true
+        RETURN e
+        ORDER BY e.timestamp DESC
+        LIMIT 1
+    """, {"sessionId": session_id})
+    return _node_to_dict(results[0], "e") if results else None
+
+
+def get_recent_tool_patterns(session_id: str, limit: int = 10) -> list[dict]:
+    """Get recent tool calls for pattern analysis."""
+    results = run_query("""
+        MATCH (e:Event)-[:TRIGGERED_BY]->(s:Session {id: $sessionId})
+        WHERE e.event_type = 'ToolCall'
+        RETURN e.tool_name as tool_name,
+               e.payload as payload,
+               e.timestamp as timestamp
+        ORDER BY e.timestamp DESC
+        LIMIT $limit
+    """, {"sessionId": session_id, "limit": limit})
+    return [dict(r) for r in results]
+
+
+def find_repeated_patterns(events: list[dict]) -> Optional[dict]:
+    """
+    Find repeated tool call patterns that indicate being stuck.
+    Returns pattern info if found, None otherwise.
+    """
+    if len(events) < 3:
+        return None
+
+    # Group by tool_name
+    tool_counts = {}
+    tool_payloads = {}
+
+    for event in events:
+        tool = event.get("tool_name", "")
+        if not tool:
+            continue
+
+        tool_counts[tool] = tool_counts.get(tool, 0) + 1
+
+        # Track payload similarity
+        payload_str = str(event.get("payload", ""))[:100]
+        if tool not in tool_payloads:
+            tool_payloads[tool] = []
+        tool_payloads[tool].append(payload_str)
+
+    # Check for repetition
+    for tool, count in tool_counts.items():
+        if count >= 3:
+            # Check if payloads are similar (potential loop)
+            payloads = tool_payloads[tool]
+            if len(set(payloads)) <= 2:  # Very similar payloads
+                return {
+                    "tool": tool,
+                    "count": count,
+                    "description": f"{tool} called {count}x with similar args"
+                }
+
+    return None
+
+
+def get_step_duration_stats(step_id: str) -> dict:
+    """Get timing stats for a step."""
+    results = run_query("""
+        MATCH (s:Step {id: $stepId})
+        OPTIONAL MATCH (e:Event)-[:PART_OF_STEP]->(s)
+        WITH s, count(e) as event_count, max(e.timestamp) as last_activity
+        RETURN s.started_at as started_at,
+               s.status as status,
+               event_count,
+               last_activity
+    """, {"stepId": step_id})
+
+    if results:
+        r = results[0]
+        # Calculate minutes if started_at exists
+        minutes = 0
+        started = r.get("started_at")
+        if started:
+            try:
+                if hasattr(started, 'to_native'):
+                    from datetime import datetime, timezone
+                    delta = datetime.now(timezone.utc) - started.to_native()
+                    minutes = int(delta.total_seconds() / 60)
+            except Exception:
+                pass
+        return {
+            "started_at": str(started or ""),
+            "status": r.get("status", ""),
+            "event_count": int(r.get("event_count") or 0),
+            "last_activity": str(r.get("last_activity") or ""),
+            "minutes_active": minutes
+        }
+    return {}
+
+
+# =============================================================================
 # DEPRECATED - Import from feature_list.json
 # =============================================================================
 # This function is deprecated. The graph database is now the single source of truth.
