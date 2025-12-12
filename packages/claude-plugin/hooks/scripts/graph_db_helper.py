@@ -1155,6 +1155,111 @@ def get_step_duration_stats(step_id: str) -> dict:
 
 
 # =============================================================================
+# Commit Operations
+# =============================================================================
+
+def insert_commit(hash: str, message: str, author: str = None) -> Optional[str]:
+    """Insert a Commit node into the graph."""
+    cypher = '''
+    MERGE (c:Commit {hash: $hash})
+    ON CREATE SET
+        c.id = $hash,
+        c.message = $message,
+        c.author = $author,
+        c.timestamp = timestamp()
+    RETURN c.id as id
+    '''
+    result = run_write_query(cypher, {
+        "hash": hash,
+        "message": message,
+        "author": author
+    })
+    return result[0]["id"] if result else None
+
+
+def link_commit_to_feature(commit_hash: str, feature_id: str) -> bool:
+    """Create IMPLEMENTED_IN relationship from Commit to Feature."""
+    cypher = '''
+    MATCH (c:Commit {hash: $hash})
+    MATCH (f:Feature {id: $feature_id})
+    MERGE (c)-[:IMPLEMENTED_IN]->(f)
+    RETURN true as success
+    '''
+    result = run_write_query(cypher, {
+        "hash": commit_hash,
+        "feature_id": feature_id
+    })
+    return bool(result)
+
+
+def link_commit_to_session(commit_hash: str, session_id: str) -> bool:
+    """Create MADE_COMMITS relationship from Session to Commit."""
+    cypher = '''
+    MATCH (c:Commit {hash: $hash})
+    MATCH (s:Session {id: $session_id})
+    MERGE (s)-[:MADE_COMMITS]->(c)
+    RETURN true as success
+    '''
+    result = run_write_query(cypher, {
+        "hash": commit_hash,
+        "session_id": session_id
+    })
+    return bool(result)
+
+
+def link_session_ancestry(new_session_id: str, prev_session_id: str) -> bool:
+    """Create CONTINUED_FROM relationship between sessions."""
+    cypher = '''
+    MATCH (new:Session {id: $new_id})
+    MATCH (prev:Session {id: $prev_id})
+    MERGE (new)-[:CONTINUED_FROM]->(prev)
+    RETURN true as success
+    '''
+    result = run_write_query(cypher, {
+        "new_id": new_session_id,
+        "prev_id": prev_session_id
+    })
+    return bool(result)
+
+
+def get_previous_session(project_id: str, current_session_id: str) -> Optional[dict]:
+    """Get the most recent previous session for a project."""
+    cypher = '''
+    MATCH (s:Session)
+    WHERE s.project_id = $project_id AND s.id <> $current_id
+    RETURN s.id as id, s.created_at as created_at
+    ORDER BY s.created_at DESC
+    LIMIT 1
+    '''
+    result = run_query(cypher, {
+        "project_id": project_id,
+        "current_id": current_session_id
+    })
+    return result[0] if result else None
+
+
+def get_session_commits(session_id: str) -> list[dict]:
+    """Get all commits made in a session."""
+    cypher = '''
+    MATCH (s:Session {id: $session_id})-[:MADE_COMMITS]->(c:Commit)
+    RETURN c.hash as hash, c.message as message, c.timestamp as timestamp
+    ORDER BY c.timestamp DESC
+    '''
+    return run_query(cypher, {"session_id": session_id})
+
+
+def get_feature_commits(feature_id: str, limit: int = 3) -> list[dict]:
+    """Get recent commits for a feature."""
+    cypher = '''
+    MATCH (f:Feature {id: $feature_id})<-[:IMPLEMENTED_IN]-(c:Commit)
+    RETURN c.hash as hash, c.message as message, c.timestamp as timestamp
+    ORDER BY c.timestamp DESC
+    LIMIT $limit
+    '''
+    return run_query(cypher, {"feature_id": feature_id, "limit": limit})
+
+
+# =============================================================================
 # DEPRECATED - Import from feature_list.json
 # =============================================================================
 # This function is deprecated. The graph database is now the single source of truth.
