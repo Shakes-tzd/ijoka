@@ -251,4 +251,95 @@ These insights can be surfaced to future sessions working on similar tasks.`,
       required: ['description', 'category'],
     },
   },
+
+  // ==========================================================================
+  // TIER 4: Plan Management (~300 tokens)
+  // ==========================================================================
+  {
+    name: 'ijoka_set_plan',
+    description: `Declare your implementation plan for the current feature. Creates Step nodes that track your progress.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        steps: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Ordered list of implementation steps',
+        },
+        feature_id: {
+          type: 'string',
+          description: 'Feature ID to set plan for (uses active feature if not specified)',
+        },
+        project_path: {
+          type: 'string',
+          description: 'Project path (defaults to current working directory)',
+        },
+        source_agent: {
+          type: 'string',
+          description: 'Agent identifier (e.g., claude-code, gemini-cli, codex-cli). Required for non-Claude tools.',
+        },
+        session_id: {
+          type: 'string',
+          description: 'Unique session identifier from the calling agent',
+        },
+      },
+      required: ['steps'],
+    },
+  },
+  {
+    name: 'ijoka_checkpoint',
+    description: `Report progress and get feedback on current work. Returns any drift or stuckness warnings.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        step_completed: {
+          type: 'string',
+          description: 'Description of step just completed (optional)',
+        },
+        current_activity: {
+          type: 'string',
+          description: 'What you are currently working on',
+        },
+        project_path: {
+          type: 'string',
+          description: 'Project path (defaults to current working directory)',
+        },
+        source_agent: {
+          type: 'string',
+          description: 'Agent identifier (e.g., claude-code, gemini-cli, codex-cli). Required for non-Claude tools.',
+        },
+        session_id: {
+          type: 'string',
+          description: 'Unique session identifier from the calling agent',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'ijoka_get_plan',
+    description: `Get the current plan status including all steps and their progress.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        feature_id: {
+          type: 'string',
+          description: 'Feature ID to get plan for (uses active feature if not specified)',
+        },
+        project_path: {
+          type: 'string',
+          description: 'Project path (defaults to current working directory)',
+        },
+        source_agent: {
+          type: 'string',
+          description: 'Agent identifier (e.g., claude-code, gemini-cli, codex-cli). Required for non-Claude tools.',
+        },
+        session_id: {
+          type: 'string',
+          description: 'Unique session identifier from the calling agent',
+        },
+      },
+      required: [],
+    },
+  },
 ];

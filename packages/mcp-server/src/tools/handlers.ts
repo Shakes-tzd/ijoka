@@ -46,6 +46,15 @@ export async function handleToolCall(
     case 'ijoka_create_feature':
       result = await handleCreateFeature(args);
       break;
+    case 'ijoka_set_plan':
+      result = await handleSetPlan(args);
+      break;
+    case 'ijoka_checkpoint':
+      result = await handleCheckpoint(args);
+      break;
+    case 'ijoka_get_plan':
+      result = await handleGetPlan(args);
+      break;
     default:
       result = {
         success: false,
@@ -299,5 +308,159 @@ async function handleCreateFeature(args: Record<string, unknown>): Promise<ToolR
     success: true,
     feature,
     message: `Created feature: ${description}`,
+  };
+}
+
+async function handleSetPlan(args: Record<string, unknown>): Promise<ToolResult> {
+  const projectPath = getProjectPath(args.project_path as string | undefined);
+  const steps = args.steps as string[];
+  let featureId = args.feature_id as string | undefined;
+
+  if (!steps || steps.length === 0) {
+    return {
+      success: false,
+      error: 'Steps array is required',
+    };
+  }
+
+  // Get feature
+  if (!featureId) {
+    const activeFeature = await db.getActiveFeature(projectPath);
+    if (!activeFeature) {
+      return {
+        success: false,
+        error: 'No active feature. Start a feature first.',
+      };
+    }
+    featureId = activeFeature.id;
+  }
+
+  // Sync steps
+  const createdSteps = await db.syncStepsFromArray(featureId, steps);
+
+  return {
+    success: true,
+    feature_id: featureId,
+    steps: createdSteps,
+    message: `Created/updated ${createdSteps.length} steps`,
+  };
+}
+
+async function handleCheckpoint(args: Record<string, unknown>): Promise<ToolResult> {
+  const projectPath = getProjectPath(args.project_path as string | undefined);
+  const stepCompleted = args.step_completed as string | undefined;
+  const currentActivity = args.current_activity as string | undefined;
+
+  const activeFeature = await db.getActiveFeature(projectPath);
+  if (!activeFeature) {
+    return {
+      success: true,
+      message: 'No active feature',
+      warnings: [],
+    };
+  }
+
+  const activeStep = await db.getActiveStep(activeFeature.id);
+  const warnings: string[] = [];
+
+  // Mark step completed if specified
+  if (stepCompleted && activeStep) {
+    if (
+      activeStep.description.toLowerCase().includes(stepCompleted.toLowerCase()) ||
+      stepCompleted.toLowerCase().includes(activeStep.description.toLowerCase())
+    ) {
+      await db.updateStepStatus(activeStep.id, 'completed');
+
+      // Start next step
+      const steps = await db.getSteps(activeFeature.id);
+      const nextStep = steps.find((s) => s.status === 'pending');
+      if (nextStep) {
+        await db.updateStepStatus(nextStep.id, 'in_progress');
+      }
+    }
+  }
+
+  // Get updated state
+  const steps = await db.getSteps(activeFeature.id);
+  const completed = steps.filter((s) => s.status === 'completed').length;
+  const total = steps.length;
+
+  // Simple drift check based on current_activity vs active step
+  const newActiveStep = await db.getActiveStep(activeFeature.id);
+  if (newActiveStep && currentActivity) {
+    const stepKeywords = new Set(newActiveStep.description.toLowerCase().split(/\s+/));
+    const activityKeywords = new Set(currentActivity.toLowerCase().split(/\s+/));
+    const overlap = [...stepKeywords].filter((k) => activityKeywords.has(k)).length;
+
+    if (overlap < 2 && stepKeywords.size > 3) {
+      warnings.push(
+        `Current activity may not align with step: "${newActiveStep.description}"`
+      );
+    }
+  }
+
+  return {
+    success: true,
+    feature: {
+      id: activeFeature.id,
+      description: activeFeature.description,
+    },
+    active_step: newActiveStep,
+    progress: {
+      completed,
+      total,
+      percentage: Math.round((completed / total) * 100),
+    },
+    warnings,
+  };
+}
+
+async function handleGetPlan(args: Record<string, unknown>): Promise<ToolResult> {
+  const projectPath = getProjectPath(args.project_path as string | undefined);
+  let featureId = args.feature_id as string | undefined;
+
+  if (!featureId) {
+    const activeFeature = await db.getActiveFeature(projectPath);
+    if (!activeFeature) {
+      return {
+        success: true,
+        message: 'No active feature',
+        steps: [],
+      };
+    }
+    featureId = activeFeature.id;
+  }
+
+  const feature = await db.getFeatureById(featureId);
+  const steps = await db.getSteps(featureId);
+  const activeStep = await db.getActiveStep(featureId);
+
+  const completed = steps.filter((s) => s.status === 'completed').length;
+
+  return {
+    success: true,
+    feature: feature
+      ? {
+          id: feature.id,
+          description: feature.description,
+          status: feature.status,
+        }
+      : null,
+    steps: steps.map((s) => ({
+      order: s.step_order,
+      description: s.description,
+      status: s.status,
+    })),
+    active_step: activeStep
+      ? {
+          order: activeStep.step_order,
+          description: activeStep.description,
+        }
+      : null,
+    progress: {
+      completed,
+      total: steps.length,
+      percentage: steps.length > 0 ? Math.round((completed / steps.length) * 100) : 0,
+    },
   };
 }
