@@ -825,6 +825,20 @@ def update_session_activity(session_id: str) -> None:
     )
 
 
+def update_session_start_commit(session_id: str, commit_hash: str) -> bool:
+    """Set the starting commit hash on a session."""
+    cypher = '''
+    MATCH (s:Session {id: $session_id})
+    SET s.start_commit = $commit_hash
+    RETURN true as success
+    '''
+    result = run_write_query(cypher, {
+        "session_id": session_id,
+        "commit_hash": commit_hash
+    })
+    return bool(result)
+
+
 # =============================================================================
 # Stats Operations
 # =============================================================================

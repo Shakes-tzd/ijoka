@@ -17,12 +17,45 @@ Architecture:
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 # Import shared database helper
 sys.path.insert(0, str(Path(__file__).parent))
 import graph_db_helper as db_helper
+
+
+def get_head_commit(project_dir: str) -> Optional[str]:
+    """Get current HEAD commit hash (short form)."""
+    try:
+        result = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'],
+            capture_output=True,
+            text=True,
+            cwd=project_dir,
+            timeout=5
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()[:7]
+    except Exception as e:
+        # Silently fail - not in a git repo or git not available
+        pass
+    return None
+
+
+def link_to_previous_session(session_id: str, project_id: str) -> Optional[str]:
+    """Link this session to its predecessor if one exists."""
+    try:
+        prev = db_helper.get_previous_session(project_id, session_id)
+        if prev:
+            db_helper.link_session_ancestry(session_id, prev["id"])
+            return prev["id"]
+    except Exception as e:
+        # Silently fail - not critical
+        pass
+    return None
 
 
 def run_quick_diagnostics(project_dir: str) -> list[str]:
@@ -81,6 +114,14 @@ def main():
 
     # Record session start in database
     db_helper.start_session(session_id, "claude-code", project_dir)
+
+    # Capture the HEAD commit hash and set it on the session
+    head_commit = get_head_commit(project_dir)
+    if head_commit:
+        db_helper.update_session_start_commit(session_id, head_commit)
+
+    # Link this session to its predecessor if one exists
+    link_to_previous_session(session_id, project_dir)
 
     # Record session start event (use session_id + event_type as unique ID for deduplication)
     db_helper.insert_event(
