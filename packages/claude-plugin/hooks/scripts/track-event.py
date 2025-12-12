@@ -14,6 +14,7 @@ Links events to the active feature.
 import json
 import os
 import sys
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -136,6 +137,89 @@ def get_cached_shell(bash_id: str) -> dict:
     """Get cached shell info by bash_id."""
     cache = get_shell_cache()
     return cache.get(bash_id, {})
+
+
+# =============================================================================
+# Drift Detection Functions
+# =============================================================================
+
+def extract_keywords(text: str) -> set[str]:
+    """Extract meaningful keywords from text for comparison."""
+    if not text:
+        return set()
+    stop_words = {
+        'the', 'a', 'an', 'is', 'are', 'to', 'of', 'in', 'for', 'on', 'with',
+        'and', 'or', 'not', 'this', 'that', 'it', 'be', 'as', 'at', 'by',
+        'from', 'has', 'have', 'had', 'do', 'does', 'did', 'will', 'would',
+        'could', 'should', 'may', 'might', 'must', 'shall', 'can'
+    }
+    words = re.findall(r'\b[a-zA-Z][a-zA-Z0-9_]{2,}\b', text.lower())
+    return {w for w in words if w not in stop_words}
+
+
+def calculate_drift(step: dict, tool_name: str, tool_input: dict, payload: dict) -> tuple[float, str]:
+    """
+    Calculate drift score between current activity and expected step work.
+    Returns (score, reason) where score is 0.0 (aligned) to 1.0 (drifted).
+    """
+    if not step:
+        return 0.0, "no_step"
+
+    score = 0.0
+    reasons = []
+
+    step_desc = step.get("description", "").lower()
+    expected_tools = step.get("expected_tools") or []
+    file_paths = payload.get("filePaths", [])
+
+    # 1. Tool alignment (0.3 weight)
+    exploration_tools = {"Read", "Glob", "Grep", "WebSearch", "WebFetch"}
+    if expected_tools and tool_name not in expected_tools:
+        if tool_name not in exploration_tools:
+            score += 0.3
+            reasons.append(f"tool:{tool_name} not expected")
+
+    # 2. File/content alignment (0.4 weight)
+    step_keywords = extract_keywords(step_desc)
+    activity_text = " ".join(str(p) for p in file_paths)
+    if tool_input.get("command"):
+        activity_text += " " + tool_input.get("command", "")
+    if tool_input.get("pattern"):
+        activity_text += " " + tool_input.get("pattern", "")
+    activity_keywords = extract_keywords(activity_text)
+
+    if step_keywords and activity_keywords:
+        overlap = len(step_keywords & activity_keywords)
+        total = max(len(step_keywords), 1)
+        if overlap / total < 0.1:
+            score += 0.4
+            reasons.append(f"files unrelated (overlap: {overlap}/{total})")
+        elif overlap / total < 0.2:
+            score += 0.2
+            reasons.append(f"weak alignment ({overlap}/{total})")
+
+    # 3. Sustained drift (0.3 weight)
+    step_id = step.get("id")
+    if step_id:
+        recent_count = db_helper.count_unrelated_events(step_id)
+        if recent_count >= 5:
+            score += 0.3
+            reasons.append(f"sustained ({recent_count} events)")
+        elif recent_count >= 3:
+            score += 0.15
+            reasons.append(f"pattern ({recent_count} events)")
+
+    return min(score, 1.0), "; ".join(reasons) if reasons else "aligned"
+
+
+def generate_drift_warning(step: dict, drift_score: float, drift_reason: str) -> str:
+    """Generate user-friendly drift warning message."""
+    step_desc = step.get("description", "Unknown")[:50]
+    if drift_score >= 0.7:
+        return f"Drift: Your recent actions don't align with the current step: '{step_desc}'. ({drift_reason}). Consider updating your plan or refocusing on the step."
+    elif drift_score >= 0.5:
+        return f"Note: Possible drift from step '{step_desc}'. Are you still working on this step?"
+    return ""
 
 
 def extract_file_paths(tool_input: dict) -> list[str]:
@@ -559,6 +643,15 @@ def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) ->
     if active_step:
         payload["stepDescription"] = active_step.get("description", "")
         payload["stepOrder"] = active_step.get("step_order", 0)
+
+    # Calculate drift score
+    drift_score = 0.0
+    drift_reason = ""
+    if active_step and not is_diagnostic:
+        drift_score, drift_reason = calculate_drift(active_step, tool_name, tool_input, payload)
+        payload["driftScore"] = drift_score
+        if drift_score > 0.3:
+            payload["driftReason"] = drift_reason
 
     # Extract success status and summary for top-level Event fields
     is_success = not safe_get_result(tool_result, "is_error", False)

@@ -551,6 +551,27 @@ def update_step_status(step_id: str, status: str) -> Optional[dict]:
     return _node_to_dict(results[0], "s") if results else None
 
 
+def get_recent_events_for_step(step_id: str, limit: int = 5) -> list[dict]:
+    """Get recent events linked to a step."""
+    results = run_query("""
+        MATCH (e:Event)-[:PART_OF_STEP]->(s:Step {id: $stepId})
+        RETURN e
+        ORDER BY e.timestamp DESC
+        LIMIT $limit
+    """, {"stepId": step_id, "limit": limit})
+    return [_node_to_dict(r, "e") for r in results]
+
+
+def count_unrelated_events(step_id: str) -> int:
+    """Count recent events in last 10 minutes for sustained drift check."""
+    results = run_query("""
+        MATCH (e:Event)-[:PART_OF_STEP]->(s:Step {id: $stepId})
+        WHERE e.timestamp > datetime() - duration('PT10M')
+        RETURN count(e) as count
+    """, {"stepId": step_id})
+    return int(results[0]["count"]) if results else 0
+
+
 def sync_steps_from_todos(feature_id: str, todos: list) -> list:
     """
     Sync Step nodes from TodoWrite payload.
