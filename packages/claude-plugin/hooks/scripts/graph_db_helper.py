@@ -20,8 +20,10 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+import time
+
 from neo4j import GraphDatabase, Driver
-from neo4j.exceptions import ServiceUnavailable, AuthError
+from neo4j.exceptions import ServiceUnavailable, AuthError, TransientError
 
 
 # =============================================================================
@@ -73,13 +75,23 @@ def run_query(cypher: str, params: Optional[dict] = None) -> list[dict]:
         return [dict(record) for record in result]
 
 
-def run_write_query(cypher: str, params: Optional[dict] = None) -> list[dict]:
-    """Run a write query and return results."""
+def run_write_query(cypher: str, params: Optional[dict] = None, max_retries: int = 3) -> list[dict]:
+    """Run a write query with retry on transaction conflicts."""
     driver = get_driver()
     config = get_config()
-    with driver.session(database=config["database"]) as session:
-        result = session.run(cypher, params or {})
-        return [dict(record) for record in result]
+
+    for attempt in range(max_retries):
+        try:
+            with driver.session(database=config["database"]) as session:
+                result = session.run(cypher, params or {})
+                return [dict(record) for record in result]
+        except TransientError as e:
+            if attempt < max_retries - 1:
+                # Exponential backoff: 0.1s, 0.2s, 0.4s
+                time.sleep(0.1 * (2 ** attempt))
+                continue
+            raise  # Re-raise on final attempt
+    return []  # Should not reach here
 
 
 def is_connected() -> bool:
