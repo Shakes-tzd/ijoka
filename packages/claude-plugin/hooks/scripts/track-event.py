@@ -299,6 +299,59 @@ def safe_get_result(tool_result, key: str, default=None):
     return default
 
 
+def handle_todowrite(hook_input: dict, project_dir: str, session_id: str) -> list[str]:
+    """
+    Handle TodoWrite tool calls - sync todos to Step nodes.
+    Returns any workflow nudges.
+    """
+    tool_input = hook_input.get("tool_input", {})
+    todos = tool_input.get("todos", [])
+
+    if not todos:
+        return []
+
+    # Get active feature
+    active_feature = db_helper.get_active_feature(project_dir)
+    if not active_feature:
+        # No active feature - could auto-create one from todos
+        # For now, just skip
+        return []
+
+    feature_id = active_feature["id"]
+
+    # Sync todos to Steps
+    step_ids = db_helper.sync_steps_from_todos(feature_id, todos)
+
+    # Record PlanUpdate event
+    payload = {
+        "todoCount": len(todos),
+        "stepIds": step_ids,
+        "featureDescription": active_feature.get("description", ""),
+        "todos": [{"content": t.get("content", ""), "status": t.get("status", "")} for t in todos[:10]]  # Limit payload size
+    }
+
+    # Create summary of plan state
+    pending = sum(1 for t in todos if t.get("status") == "pending")
+    in_progress = sum(1 for t in todos if t.get("status") == "in_progress")
+    completed = sum(1 for t in todos if t.get("status") == "completed")
+
+    summary = f"Plan updated: {completed}/{len(todos)} complete, {in_progress} in progress"
+
+    db_helper.insert_event(
+        event_type="PlanUpdate",
+        source_agent="claude-code",
+        session_id=session_id,
+        project_dir=project_dir,
+        tool_name="TodoWrite",
+        payload=payload,
+        feature_id=feature_id,
+        success=True,
+        summary=summary
+    )
+
+    return []
+
+
 def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) -> list[str]:
     """Handle PostToolUse events - track all tool calls. Returns workflow nudges."""
     tool_name = hook_input.get("tool_name", "unknown")
@@ -307,6 +360,10 @@ def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) ->
     tool_result = hook_input.get("tool_response") or hook_input.get("tool_result", {})
     # Use tool_use_id as event_id for deduplication
     tool_use_id = hook_input.get("tool_use_id")
+
+    # Special handling for TodoWrite - capture plan structure
+    if tool_name == "TodoWrite":
+        return handle_todowrite(hook_input, project_dir, session_id)
 
     # Skip tracking the tracking script itself
     if "track-event.py" in str(tool_input) or "db_helper" in str(tool_input):
