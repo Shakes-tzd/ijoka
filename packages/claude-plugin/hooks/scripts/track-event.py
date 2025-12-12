@@ -475,6 +475,19 @@ def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) ->
         payload["featureCategory"] = active_feature["category"]
         payload["featureDescription"] = active_feature["description"]
 
+    # Get active step for step-level tracking
+    step_id = None
+    active_step = None
+    if active_feature and not is_diagnostic:
+        active_step = db_helper.get_active_step(active_feature["id"])
+        if active_step:
+            step_id = active_step["id"]
+
+    # Add step context to payload
+    if active_step:
+        payload["stepDescription"] = active_step.get("description", "")
+        payload["stepOrder"] = active_step.get("step_order", 0)
+
     # Extract success status and summary for top-level Event fields
     is_success = not safe_get_result(tool_result, "is_error", False)
     summary = summarize_input(tool_name, tool_input)
@@ -488,6 +501,7 @@ def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) ->
         tool_name=tool_name,
         payload=payload,
         feature_id=feature_id,
+        step_id=step_id,
         success=is_success,
         summary=summary,
         event_id=tool_use_id

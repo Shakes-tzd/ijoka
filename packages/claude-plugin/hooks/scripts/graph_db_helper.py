@@ -681,11 +681,12 @@ def insert_event(
     tool_name: Optional[str] = None,
     payload: Optional[dict] = None,
     feature_id: Optional[str] = None,
+    step_id: Optional[str] = None,
     success: bool = True,
     summary: Optional[str] = None,
     event_id: Optional[str] = None
 ) -> str:
-    """Insert an event and return its ID. Uses MERGE to prevent duplicates."""
+    """Insert an event and return its ID. Now supports step linking."""
     if not event_id:
         event_id = str(uuid.uuid4())
 
@@ -734,6 +735,15 @@ def insert_event(
         CREATE (e)-[:LINKED_TO]->(f)
         """
         params["featureId"] = feature_id
+
+    # Link to step if provided
+    if step_id:
+        cypher += """
+        WITH e
+        MATCH (step:Step {id: $stepId})
+        MERGE (e)-[:PART_OF_STEP]->(step)
+        """
+        params["stepId"] = step_id
 
     cypher += " RETURN e.id as id"
 
