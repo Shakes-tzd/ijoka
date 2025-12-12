@@ -14,6 +14,7 @@ Links events to the active feature.
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Import shared database helper
@@ -22,6 +23,77 @@ import graph_db_helper as db_helper
 
 # Background shell cache for linking BashOutput to original commands
 SHELL_CACHE_FILE = Path.home() / ".ijoka" / "background_shells.json"
+
+
+# =============================================================================
+# Stuckness Detection Functions
+# =============================================================================
+
+def detect_stuckness(session_id: str, feature_id: str, active_step: dict | None) -> tuple[bool, str]:
+    """
+    Detect if the agent is stuck.
+    Returns (is_stuck, reason).
+    """
+    reasons = []
+
+    # 1. Time since last meaningful progress
+    last_progress = db_helper.get_last_meaningful_event(session_id)
+    if last_progress:
+        # Parse timestamp and calculate minutes since
+        try:
+            # Handle different timestamp formats from neo4j
+            timestamp = last_progress.get("timestamp")
+            if timestamp:
+                if hasattr(timestamp, 'to_native'):
+                    last_time = timestamp.to_native()
+                else:
+                    last_time = datetime.fromisoformat(str(timestamp).replace('Z', '+00:00'))
+
+                now = datetime.now(timezone.utc)
+                minutes_since = (now - last_time).total_seconds() / 60
+
+                if minutes_since > 5:
+                    return True, f"No file changes for {int(minutes_since)} minutes"
+                elif minutes_since > 3:
+                    reasons.append(f"Slow progress ({int(minutes_since)} min since last change)")
+        except Exception:
+            pass  # Timestamp parsing failed, skip this check
+
+    # 2. Repeated tool patterns (loops)
+    recent_events = db_helper.get_recent_tool_patterns(session_id)
+    pattern = db_helper.find_repeated_patterns(recent_events)
+    if pattern and pattern.get("count", 0) >= 4:
+        return True, f"Possible loop: {pattern.get('description', 'repeated tools')}"
+    elif pattern and pattern.get("count", 0) >= 3:
+        reasons.append(f"Repetitive pattern: {pattern.get('tool', '')} x{pattern.get('count', 0)}")
+
+    # 3. Step stuck (in_progress for too long with little activity)
+    if active_step:
+        step_stats = db_helper.get_step_duration_stats(active_step.get("id", ""))
+        minutes_active = step_stats.get("minutes_active", 0)
+        event_count = step_stats.get("event_count", 0)
+
+        # Step active for >15 min with <5 events = likely stuck
+        if minutes_active > 15 and event_count < 5:
+            return True, f"Step stalled: {minutes_active} min with only {event_count} events"
+        # Step active for >10 min with <3 events = possibly stuck
+        elif minutes_active > 10 and event_count < 3:
+            reasons.append(f"Step slow: {minutes_active} min, {event_count} events")
+
+    # If we have multiple warning signs but no definitive stuckness
+    if len(reasons) >= 2:
+        return True, "; ".join(reasons)
+
+    return False, ""
+
+
+def generate_stuckness_warning(reason: str) -> str:
+    """Generate a user-friendly stuckness warning message."""
+    return (
+        f"You may be stuck: {reason}. "
+        "Consider: What are you trying to accomplish? "
+        "What's the next concrete step?"
+    )
 
 
 def get_shell_cache() -> dict:
@@ -475,6 +547,19 @@ def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) ->
         payload["featureCategory"] = active_feature["category"]
         payload["featureDescription"] = active_feature["description"]
 
+    # Get active step for step-level tracking
+    step_id = None
+    active_step = None
+    if active_feature and not is_diagnostic:
+        active_step = db_helper.get_active_step(active_feature["id"])
+        if active_step:
+            step_id = active_step["id"]
+
+    # Add step context to payload
+    if active_step:
+        payload["stepDescription"] = active_step.get("description", "")
+        payload["stepOrder"] = active_step.get("step_order", 0)
+
     # Extract success status and summary for top-level Event fields
     is_success = not safe_get_result(tool_result, "is_error", False)
     summary = summarize_input(tool_name, tool_input)
@@ -488,6 +573,7 @@ def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) ->
         tool_name=tool_name,
         payload=payload,
         feature_id=feature_id,
+        step_id=step_id,
         success=is_success,
         summary=summary,
         event_id=tool_use_id

@@ -20,8 +20,10 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+import time
+
 from neo4j import GraphDatabase, Driver
-from neo4j.exceptions import ServiceUnavailable, AuthError
+from neo4j.exceptions import ServiceUnavailable, AuthError, TransientError
 
 
 # =============================================================================
@@ -73,13 +75,23 @@ def run_query(cypher: str, params: Optional[dict] = None) -> list[dict]:
         return [dict(record) for record in result]
 
 
-def run_write_query(cypher: str, params: Optional[dict] = None) -> list[dict]:
-    """Run a write query and return results."""
+def run_write_query(cypher: str, params: Optional[dict] = None, max_retries: int = 3) -> list[dict]:
+    """Run a write query with retry on transaction conflicts."""
     driver = get_driver()
     config = get_config()
-    with driver.session(database=config["database"]) as session:
-        result = session.run(cypher, params or {})
-        return [dict(record) for record in result]
+
+    for attempt in range(max_retries):
+        try:
+            with driver.session(database=config["database"]) as session:
+                result = session.run(cypher, params or {})
+                return [dict(record) for record in result]
+        except TransientError as e:
+            if attempt < max_retries - 1:
+                # Exponential backoff: 0.1s, 0.2s, 0.4s
+                time.sleep(0.1 * (2 ** attempt))
+                continue
+            raise  # Re-raise on final attempt
+    return []  # Should not reach here
 
 
 def is_connected() -> bool:
@@ -447,6 +459,133 @@ def find_similar_feature(project_dir: str, description: str) -> Optional[dict]:
 
 
 # =============================================================================
+# Step Operations (Plan-Aware Activity Tracking)
+# =============================================================================
+
+def create_step(
+    feature_id: str,
+    description: str,
+    order: int,
+    status: str = "pending",
+    expected_tools: Optional[list] = None
+) -> str:
+    """Create a Step node linked to a Feature."""
+    step_id = str(uuid.uuid4())
+    run_write_query("""
+        MATCH (f:Feature {id: $featureId})
+        CREATE (s:Step {
+            id: $stepId,
+            description: $description,
+            status: $status,
+            step_order: $order,
+            expected_tools: $expectedTools,
+            created_at: datetime(),
+            started_at: null,
+            completed_at: null
+        })-[:BELONGS_TO]->(f)
+    """, {
+        "featureId": feature_id,
+        "stepId": step_id,
+        "description": description,
+        "status": status,
+        "order": order,
+        "expectedTools": expected_tools or []
+    })
+    return step_id
+
+
+def get_steps(feature_id: str) -> list:
+    """Get all steps for a feature, ordered by step_order."""
+    results = run_query("""
+        MATCH (s:Step)-[:BELONGS_TO]->(f:Feature {id: $featureId})
+        RETURN s
+        ORDER BY s.step_order ASC
+    """, {"featureId": feature_id})
+    return [_node_to_dict(r, "s") for r in results]
+
+
+def get_active_step(feature_id: str) -> Optional[dict]:
+    """Get the currently active step (in_progress or first pending)."""
+    # First try to get in_progress step
+    results = run_query("""
+        MATCH (s:Step)-[:BELONGS_TO]->(f:Feature {id: $featureId})
+        WHERE s.status = 'in_progress'
+        RETURN s
+        ORDER BY s.step_order ASC
+        LIMIT 1
+    """, {"featureId": feature_id})
+
+    if results:
+        return _node_to_dict(results[0], "s")
+
+    # Fall back to first pending step
+    results = run_query("""
+        MATCH (s:Step)-[:BELONGS_TO]->(f:Feature {id: $featureId})
+        WHERE s.status = 'pending'
+        RETURN s
+        ORDER BY s.step_order ASC
+        LIMIT 1
+    """, {"featureId": feature_id})
+
+    return _node_to_dict(results[0], "s") if results else None
+
+
+def update_step_status(step_id: str, status: str) -> Optional[dict]:
+    """Update a step's status. Valid statuses: pending, in_progress, completed, skipped."""
+    now_field = "started_at" if status == "in_progress" else "completed_at" if status == "completed" else None
+
+    if now_field:
+        results = run_write_query(f"""
+            MATCH (s:Step {{id: $stepId}})
+            SET s.status = $status,
+                s.{now_field} = datetime()
+            RETURN s
+        """, {"stepId": step_id, "status": status})
+    else:
+        results = run_write_query("""
+            MATCH (s:Step {id: $stepId})
+            SET s.status = $status
+            RETURN s
+        """, {"stepId": step_id, "status": status})
+
+    return _node_to_dict(results[0], "s") if results else None
+
+
+def sync_steps_from_todos(feature_id: str, todos: list) -> list:
+    """
+    Sync Step nodes from TodoWrite payload.
+    Creates new steps, updates existing, marks removed as skipped.
+    Returns list of step IDs.
+    """
+    existing_steps = get_steps(feature_id)
+    existing_by_desc = {s.get("description", ""): s for s in existing_steps}
+
+    step_ids = []
+    for i, todo in enumerate(todos):
+        desc = todo.get("content", "")
+        status_map = {"pending": "pending", "in_progress": "in_progress", "completed": "completed"}
+        status = status_map.get(todo.get("status", "pending"), "pending")
+
+        if desc in existing_by_desc:
+            # Update existing step
+            step = existing_by_desc[desc]
+            update_step_status(step["id"], status)
+            step_ids.append(step["id"])
+        else:
+            # Create new step
+            step_id = create_step(feature_id, desc, i, status)
+            step_ids.append(step_id)
+
+    # Mark steps not in todos as skipped
+    current_descs = {todo.get("content", "") for todo in todos}
+    for step in existing_steps:
+        if step.get("description", "") not in current_descs:
+            update_step_status(step["id"], "skipped")
+
+    return step_ids
+
+
+# =============================================================================
 # StatusEvent Operations (Temporal Pattern)
 # =============================================================================
 
@@ -554,11 +693,12 @@ def insert_event(
     tool_name: Optional[str] = None,
     payload: Optional[dict] = None,
     feature_id: Optional[str] = None,
+    step_id: Optional[str] = None,
     success: bool = True,
     summary: Optional[str] = None,
     event_id: Optional[str] = None
 ) -> str:
-    """Insert an event and return its ID. Uses MERGE to prevent duplicates."""
+    """Insert an event and return its ID. Now supports step linking."""
     if not event_id:
         event_id = str(uuid.uuid4())
 
@@ -607,6 +747,15 @@ def insert_event(
         CREATE (e)-[:LINKED_TO]->(f)
         """
         params["featureId"] = feature_id
+
+    # Link to step if provided
+    if step_id:
+        cypher += """
+        WITH e
+        MATCH (step:Step {id: $stepId})
+        MERGE (e)-[:PART_OF_STEP]->(step)
+        """
+        params["stepId"] = step_id
 
     cypher += " RETURN e.id as id"
 
@@ -897,6 +1046,112 @@ def has_been_nudged(session_id: str, nudge_type: str) -> bool:
         {"sessionId": session_id, "nudgeType": nudge_type}
     )
     return bool(results and results[0].get("nudged"))
+
+
+# =============================================================================
+# Stuckness Detection Functions
+# =============================================================================
+
+def get_last_meaningful_event(session_id: str) -> Optional[dict]:
+    """Get the last event that indicates real progress (Edit, Write with success)."""
+    results = run_query("""
+        MATCH (e:Event)-[:TRIGGERED_BY]->(s:Session {id: $sessionId})
+        WHERE e.tool_name IN ['Edit', 'Write']
+        AND e.success = true
+        RETURN e
+        ORDER BY e.timestamp DESC
+        LIMIT 1
+    """, {"sessionId": session_id})
+    return _node_to_dict(results[0], "e") if results else None
+
+
+def get_recent_tool_patterns(session_id: str, limit: int = 10) -> list[dict]:
+    """Get recent tool calls for pattern analysis."""
+    results = run_query("""
+        MATCH (e:Event)-[:TRIGGERED_BY]->(s:Session {id: $sessionId})
+        WHERE e.event_type = 'ToolCall'
+        RETURN e.tool_name as tool_name,
+               e.payload as payload,
+               e.timestamp as timestamp
+        ORDER BY e.timestamp DESC
+        LIMIT $limit
+    """, {"sessionId": session_id, "limit": limit})
+    return [dict(r) for r in results]
+
+
+def find_repeated_patterns(events: list[dict]) -> Optional[dict]:
+    """
+    Find repeated tool call patterns that indicate being stuck.
+    Returns pattern info if found, None otherwise.
+    """
+    if len(events) < 3:
+        return None
+
+    # Group by tool_name
+    tool_counts = {}
+    tool_payloads = {}
+
+    for event in events:
+        tool = event.get("tool_name", "")
+        if not tool:
+            continue
+
+        tool_counts[tool] = tool_counts.get(tool, 0) + 1
+
+        # Track payload similarity
+        payload_str = str(event.get("payload", ""))[:100]
+        if tool not in tool_payloads:
+            tool_payloads[tool] = []
+        tool_payloads[tool].append(payload_str)
+
+    # Check for repetition
+    for tool, count in tool_counts.items():
+        if count >= 3:
+            # Check if payloads are similar (potential loop)
+            payloads = tool_payloads[tool]
+            if len(set(payloads)) <= 2:  # Very similar payloads
+                return {
+                    "tool": tool,
+                    "count": count,
+                    "description": f"{tool} called {count}x with similar args"
+                }
+
+    return None
+
+
+def get_step_duration_stats(step_id: str) -> dict:
+    """Get timing stats for a step."""
+    results = run_query("""
+        MATCH (s:Step {id: $stepId})
+        OPTIONAL MATCH (e:Event)-[:PART_OF_STEP]->(s)
+        WITH s, count(e) as event_count, max(e.timestamp) as last_activity
+        RETURN s.started_at as started_at,
+               s.status as status,
+               event_count,
+               last_activity
+    """, {"stepId": step_id})
+
+    if results:
+        r = results[0]
+        # Calculate minutes if started_at exists
+        minutes = 0
+        started = r.get("started_at")
+        if started:
+            try:
+                if hasattr(started, 'to_native'):
+                    from datetime import datetime, timezone
+                    delta = datetime.now(timezone.utc) - started.to_native()
+                    minutes = int(delta.total_seconds() / 60)
+            except Exception:
+                pass
+        return {
+            "started_at": str(started or ""),
+            "status": r.get("status", ""),
+            "event_count": int(r.get("event_count") or 0),
+            "last_activity": str(r.get("last_activity") or ""),
+            "minutes_active": minutes
+        }
+    return {}
 
 
 # =============================================================================
