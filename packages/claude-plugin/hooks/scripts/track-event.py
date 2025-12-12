@@ -222,6 +222,67 @@ def generate_drift_warning(step: dict, drift_score: float, drift_reason: str) ->
     return ""
 
 
+def generate_observability_feedback(
+    session_id: str,
+    project_dir: str,
+    feature_id: str | None,
+    active_step: dict | None,
+    tool_name: str,
+    tool_input: dict,
+    payload: dict
+) -> list[str]:
+    """
+    Generate observability warnings combining drift and stuckness detection.
+    Returns list of warning messages to inject via additionalContext.
+    """
+    warnings = []
+
+    # Skip for meta/diagnostic tools
+    if is_mcp_meta_tool(tool_name) or is_diagnostic_command(tool_name, tool_input):
+        return warnings
+
+    # 1. Drift detection
+    if active_step:
+        drift_score, drift_reason = calculate_drift(active_step, tool_name, tool_input, payload)
+
+        if drift_score >= 0.7:
+            nudge_key = f"drift:{active_step.get('id', '')}"
+            if not db_helper.has_been_nudged(session_id, nudge_key):
+                warning = generate_drift_warning(active_step, drift_score, drift_reason)
+                if warning:
+                    warnings.append(warning)
+                    db_helper.record_nudge(session_id, nudge_key)
+        elif drift_score >= 0.5:
+            nudge_key = f"drift_mild:{active_step.get('id', '')}"
+            if not db_helper.has_been_nudged(session_id, nudge_key):
+                step_desc = active_step.get("description", "")[:40]
+                warnings.append(f"Note: Activity may be drifting from step '{step_desc}'")
+                db_helper.record_nudge(session_id, nudge_key)
+
+    # 2. Stuckness detection
+    is_stuck, stuck_reason = detect_stuckness(session_id, feature_id, active_step)
+    if is_stuck:
+        nudge_key = "stuckness"
+        if not db_helper.has_been_nudged(session_id, nudge_key):
+            warning = generate_stuckness_warning(stuck_reason)
+            warnings.append(warning)
+            db_helper.record_nudge(session_id, nudge_key)
+
+    # 3. Step completion suggestion (after successful test/build)
+    if active_step and tool_name == "Bash":
+        cmd = tool_input.get("command", "").lower()
+        is_error = safe_get_result(payload, "success", True) == False
+
+        if not is_error and any(x in cmd for x in ["test", "pytest", "jest", "vitest", "build", "cargo build"]):
+            nudge_key = f"step_complete:{active_step.get('id', '')}"
+            if not db_helper.has_been_nudged(session_id, nudge_key):
+                step_desc = active_step.get("description", "")[:40]
+                warnings.append(f"Tests/build passed. If step '{step_desc}' is done, update your todo list to mark it complete.")
+                db_helper.record_nudge(session_id, nudge_key)
+
+    return warnings
+
+
 def extract_file_paths(tool_input: dict) -> list[str]:
     """Extract file paths from tool input."""
     paths = []
@@ -697,10 +758,15 @@ def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) ->
             summary=f"Feature completed: {completion_status}"
         )
 
-    # Generate workflow nudges
-    nudges = generate_workflow_nudges(
-        tool_name, tool_input, tool_result,
-        project_dir, session_id, active_feature
+    # Generate observability feedback (unified drift + stuckness + step completion)
+    nudges = generate_observability_feedback(
+        session_id=session_id,
+        project_dir=project_dir,
+        feature_id=feature_id,
+        active_step=active_step,
+        tool_name=tool_name,
+        tool_input=tool_input,
+        payload=payload
     )
     return nudges
 
