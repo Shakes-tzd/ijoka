@@ -17,6 +17,7 @@ import sys
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 # Import shared database helper
 sys.path.insert(0, str(Path(__file__).parent))
@@ -508,6 +509,50 @@ def handle_todowrite(hook_input: dict, project_dir: str, session_id: str) -> lis
     return []
 
 
+def detect_git_commit(tool_name: str, tool_input: str, tool_output: str) -> Optional[dict]:
+    """Detect git commit from Bash tool call."""
+    if tool_name != "Bash":
+        return None
+
+    # Convert tool_input to string if it's a dict
+    tool_input_str = str(tool_input)
+    tool_output_str = str(tool_output)
+
+    if "git commit" not in tool_input_str:
+        return None
+
+    # Parse commit hash from output: [branch_name abc1234] Message
+    hash_pattern = r'\[[\w/-]+ (?:\(root-commit\) )?([a-f0-9]{7,})\]'
+    match = re.search(hash_pattern, tool_output_str)
+
+    if not match:
+        return None
+
+    commit_hash = match.group(1)
+
+    # Extract message
+    msg_pattern = r'\[[^\]]+\] (.+?)(?:\n|$)'
+    msg_match = re.search(msg_pattern, tool_output_str)
+    message = msg_match.group(1) if msg_match else "No message"
+
+    return {"hash": commit_hash, "message": message[:200]}
+
+
+def handle_git_commit(commit_info: dict, session_id: str, active_feature_id: Optional[str]):
+    """Create Commit node and link to session/feature."""
+    try:
+        db_helper.insert_commit(commit_info["hash"], commit_info["message"])
+        db_helper.link_commit_to_session(commit_info["hash"], session_id)
+
+        if active_feature_id:
+            db_helper.link_commit_to_feature(commit_info["hash"], active_feature_id)
+    except Exception as e:
+        # Log error but don't fail the hook
+        debug_log = Path.home() / ".ijoka" / "hook_debug.log"
+        with open(debug_log, "a") as f:
+            f.write(f"Error handling git commit: {e}\n")
+
+
 def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) -> list[str]:
     """Handle PostToolUse events - track all tool calls. Returns workflow nudges."""
     tool_name = hook_input.get("tool_name", "unknown")
@@ -520,6 +565,16 @@ def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) ->
     # Special handling for TodoWrite - capture plan structure
     if tool_name == "TodoWrite":
         return handle_todowrite(hook_input, project_dir, session_id)
+
+    # Detect git commits in Bash tool calls
+    if tool_name == "Bash":
+        tool_output = safe_get_result(tool_result, "output", "") or str(tool_result)
+        commit_info = detect_git_commit(tool_name, tool_input, tool_output)
+        if commit_info:
+            # Get active feature to link commit
+            active_feature = db_helper.get_active_feature(project_dir)
+            active_feature_id = active_feature["id"] if active_feature else None
+            handle_git_commit(commit_info, session_id, active_feature_id)
 
     # Skip tracking the tracking script itself
     if "track-event.py" in str(tool_input) or "db_helper" in str(tool_input):
