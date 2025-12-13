@@ -12,11 +12,9 @@ Optionally provide a summary of what was accomplished.
 
 ## Instructions
 
-⚠️ **Note:** MCP server is deprecated. Use CLI commands when MCP tools are unavailable.
-
 When this command is invoked:
 
-1. **Get current status** - Use `ijoka_status` MCP tool OR `ijoka status` CLI to find the active feature
+1. **Get current status** - Run `ijoka status` to find the active feature
 
 2. **If no active feature**:
    - Report: "No feature is currently active"
@@ -24,17 +22,11 @@ When this command is invoked:
 
 3. **Verify completion** - Before marking complete, check:
    - Has work been done? (check for recent events/commits)
-   - Are there pending plan steps? (MCP: `ijoka_get_plan` OR CLI: `ijoka plan show`)
+   - Are there pending plan steps? Run `ijoka plan show`
    - If incomplete plan, warn: "Plan has uncompleted steps. Mark complete anyway?"
 
-4. **Complete the feature** - Use `ijoka_complete_feature` MCP tool OR CLI:
+4. **Complete the feature**:
    ```bash
-   # MCP tool
-   ijoka_complete_feature:
-     feature_id: "<active_feature_id>"
-     summary: "<summary from args or auto-generated>"
-
-   # OR CLI
    ijoka feature complete --summary "summary text"
    ```
 

@@ -29,31 +29,24 @@ When the user runs `/ijoka:start`, you MUST:
 
 **BEFORE doing anything else** - before reading files, running queries, or exploring the codebase:
 
-**If MCP tools are available** (e.g., `ijoka_status` in your tools):
-1. **CALL** `ijoka_status` MCP tool immediately
-2. **CALL** `ijoka_get_plan` if there's an active feature
-
-**If MCP tools are NOT available**, use CLI commands:
 ```bash
 ijoka status
 ijoka plan show  # if there's an active feature
 ```
 
-**DO NOT** query databases directly or run Python scripts - use the official interfaces (MCP tools or CLI).
-
-⚠️ **Note:** MCP server is deprecated. Prefer CLI commands for new workflows.
+**DO NOT** query databases directly or run Python scripts - use the CLI.
 
 ---
 
 ### 1. Get Current Status
-Use `ijoka_status` MCP tool OR `ijoka status` CLI command to get:
+Use `ijoka status` to get:
 - Current project info
 - Active feature (if any)
 - Overall progress statistics
 - Active session info
 
 ### 2. Get Plan Progress (if active feature)
-Use `ijoka_get_plan` MCP tool OR `ijoka plan show` CLI command to see:
+Use `ijoka plan show` to see:
 - Step completion status
 - Current step being worked on
 

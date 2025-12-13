@@ -9,8 +9,6 @@ Start working on the next available feature from the Ijoka graph database.
 3. Displays the feature details and any defined steps
 4. Optionally sets up a plan
 
-⚠️ **Note:** MCP server is deprecated. Use CLI commands when MCP tools are unavailable.
-
 ## Usage
 
 Run `/next-feature` to automatically pick up the next task.
@@ -22,9 +20,9 @@ Optionally specify a category: `/next-feature security`
 User: `/next-feature`
 
 Claude will:
-1. Get current status (MCP: `ijoka_status` OR CLI: `ijoka status`)
+1. Get current status: `ijoka status`
 2. Find next pending feature (highest priority)
-3. Start the feature (MCP: `ijoka_start_feature` OR CLI: `ijoka feature start <ID>`)
+3. Start the feature: `ijoka feature start <ID>`
 4. Display the feature details
 5. Ask if you want to create a step plan
 
@@ -42,7 +40,7 @@ When category specified:
 
 When the user runs this command:
 
-1. **Get current status** - Use `ijoka_status` MCP tool OR `ijoka status` CLI
+1. **Get current status** - Run `ijoka status`
    - Check if there's already an active feature
    - If yes, ask: "You have an active feature. Complete it first or switch?"
 
@@ -52,7 +50,7 @@ When the user runs this command:
    - Select highest priority unblocked feature
    - If no features available, suggest `/add-feature`
 
-3. **Start the feature** - Use `ijoka_start_feature` MCP tool OR `ijoka feature start <ID>` CLI
+3. **Start the feature** - Run `ijoka feature start <ID>`
 
 4. **Display feature info**:
    ```
@@ -69,7 +67,7 @@ When the user runs this command:
    ```
 
 5. **Offer to create plan** - Ask if they want to set up a detailed plan:
-   - If yes, help define steps (MCP: `ijoka_set_plan` OR CLI: `ijoka plan set`)
+   - If yes, help define steps: `ijoka plan set`
    - If no, proceed with implementation
 
 6. **Begin work** - Start implementing the feature
@@ -79,5 +77,5 @@ When the user runs this command:
 - Only work on ONE feature at a time
 - Complete each step before moving on
 - Test thoroughly before marking as complete
-- Report progress (MCP: `ijoka_checkpoint` OR CLI: `ijoka checkpoint`)
+- Report progress: `ijoka checkpoint`
 - Use `/complete-feature` when done

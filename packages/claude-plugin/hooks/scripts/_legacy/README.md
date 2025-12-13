@@ -13,7 +13,7 @@ These scripts are deprecated and not used in production. They are kept for refer
 
 All feature management now uses:
 - **Memgraph** as single source of truth
-- **MCP tools** (`ijoka_create_feature`, `ijoka_status`, etc.)
+- **ijoka CLI** (`ijoka feature create`, `ijoka status`, etc.)
 - **graph_db_helper.py** for database operations
 - **git_utils.py** for project resolution
 

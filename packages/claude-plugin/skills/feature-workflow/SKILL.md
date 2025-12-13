@@ -14,7 +14,7 @@ Activate this skill when:
 
 Ijoka uses **Memgraph** (graph database) as the single source of truth for features, sessions, and activity. This solves the core challenge of long-running agents: maintaining context across multiple sessions.
 
-**Interface:** Use the `ijoka` CLI or REST API (port 8000) for all operations. MCP is deprecated.
+**Interface:** Use the `ijoka` CLI or REST API (port 8000) for all operations.
 
 ### Data Architecture
 
@@ -164,7 +164,6 @@ Add `--json` to any command for JSON output (useful for parsing).
 **REST API Alternative (http://localhost:8000):**
 Start with `ijoka-server`, then use standard HTTP requests.
 
-⚠️ **MCP Server is DEPRECATED** - Use CLI or REST API instead.
 
 ## Commands Available
 

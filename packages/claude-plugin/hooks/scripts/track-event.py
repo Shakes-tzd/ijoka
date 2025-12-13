@@ -443,14 +443,18 @@ def calculate_feature_alignment(feature: dict, tool_name: str, tool_input: dict)
 
 
 def is_mcp_meta_tool(tool_name: str) -> bool:
-    """Check if a tool call is an MCP ijoka meta tool (feature/project management)."""
-    # MCP tools follow the pattern: mcp__<server>__<tool_name>
+    """Check if a tool call is an ijoka meta tool (feature/project management).
+
+    Note: MCP server has been deprecated, but this function is kept for
+    backwards compatibility with historical event data.
+    """
+    # Legacy MCP tools followed the pattern: mcp__<server>__<tool_name>
     return tool_name.startswith("mcp__ijoka__")
 
 
 def is_diagnostic_command(tool_name: str, tool_input: dict) -> bool:
     """Check if a tool call is a diagnostic/meta command that shouldn't be feature-attributed."""
-    # MCP ijoka tools are meta/management tools
+    # Legacy MCP ijoka tools are meta/management tools (kept for backwards compatibility)
     if is_mcp_meta_tool(tool_name):
         return True
 

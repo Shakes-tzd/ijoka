@@ -25,8 +25,6 @@ When the user runs `/ijoka:end`, you MUST follow this process:
 
 ### 1. Gather Session Information
 
-⚠️ **Note:** MCP server is deprecated. Use CLI commands when MCP tools are unavailable.
-
 **Check git status:**
 ```bash
 git status --short
@@ -35,7 +33,7 @@ git diff --stat HEAD 2>/dev/null | tail -5
 ```
 
 **Get current feature status:**
-Use `ijoka_status` MCP tool OR `ijoka status` CLI to get:
+Run `ijoka status` to get:
 - Active feature info
 - Session event count
 - Plan progress (if any)
@@ -149,16 +147,16 @@ If the user chooses an action:
 - Offer to push
 
 **Option 2 (Complete):**
-- Use `ijoka_complete_feature` MCP tool OR `ijoka feature complete` CLI
+- Run `ijoka feature complete`
 - Confirm completion
 
 **Option 3 (Blocked):**
 - Ask for blocker description
-- Use `ijoka_block_feature` MCP tool OR `ijoka feature block --reason "..."` CLI
+- Run `ijoka feature block --reason "..."`
 
 **Option 4 (Insight):**
 - Ask what they learned
-- Use `ijoka_record_insight` MCP tool OR `ijoka insight record` CLI
+- Run `ijoka insight record`
 - Categorize appropriately (pattern, gotcha, decision, etc.)
 
 **Option 5 (Just end):**

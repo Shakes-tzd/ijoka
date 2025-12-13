@@ -147,7 +147,7 @@ class GraphValidator:
             self.issues.append(ValidationIssue(
                 severity="warning",
                 category="session_work",
-                message="Session Work feature not found - MCP tool events won't be tracked",
+                message="Session Work feature not found - meta/management events won't be tracked",
                 fix_query=None  # Will be created on demand by get_or_create_session_work_feature
             ))
         elif results[0]['status'] != 'in_progress':

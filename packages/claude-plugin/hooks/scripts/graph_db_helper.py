@@ -7,7 +7,7 @@
 Ijoka Graph Database Helper
 
 Shared module for all hooks to access Memgraph (source of truth).
-Mirrors the MCP server's db.ts operations for consistency.
+Used by the ijoka CLI/API and hook scripts.
 
 Architecture:
 - Memgraph = Source of Truth (all writes go here)
@@ -215,7 +215,7 @@ def get_or_create_session_work_feature(project_dir: str) -> dict:
     """
     Get or create the 'Session Work' pseudo-feature for meta/management activities.
     This feature captures activities like:
-    - MCP tool calls (ijoka_create_feature, ijoka_status, etc.)
+    - CLI commands (ijoka feature create, ijoka status, etc.)
     - Project configuration changes
     - Feature management operations
 
@@ -557,7 +557,7 @@ def reattribute_session_work_events(
     Returns:
         Number of events re-attributed
     """
-    # Work tool names (excludes MCP meta tools)
+    # Work tool names (excludes meta/management tools)
     work_tool_names = [
         'Edit', 'Write', 'Read', 'Bash', 'Grep', 'Glob', 'Task',
         'TodoWrite', 'TodoRead', 'WebSearch', 'WebFetch', 'NotebookEdit'
@@ -621,7 +621,7 @@ def discover_feature(
     """
     Create a new feature on-demand and re-attribute recent Session Work activities.
 
-    This is the Python equivalent of the ijoka_discover_feature MCP tool.
+    This is the Python equivalent of the `ijoka feature discover` CLI command.
     Use when Claude realizes mid-session that work constitutes a distinct feature.
 
     Args:
@@ -1614,7 +1614,7 @@ def get_feature_commits(feature_id: str, limit: int = 3) -> list[dict]:
 # DEPRECATED - Import from feature_list.json
 # =============================================================================
 # This function is deprecated. The graph database is now the single source of truth.
-# Use ijoka_create_feature MCP tool or import from ijoka-implementation-plan.yaml instead.
+# Use `ijoka feature create` CLI command instead.
 # This function will be removed in a future version.
 
 def sync_features_from_json(project_dir: str, features: list[dict]) -> None:
@@ -1623,7 +1623,7 @@ def sync_features_from_json(project_dir: str, features: list[dict]) -> None:
 
     WARNING: This function is deprecated and will be removed.
     The graph database is now the single source of truth.
-    Use ijoka_create_feature MCP tool instead.
+    Use `ijoka feature create` CLI command instead.
     """
     import warnings
     warnings.warn(

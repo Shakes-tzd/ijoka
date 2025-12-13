@@ -49,9 +49,7 @@ Steps:
 
 When the user runs this command:
 
-⚠️ **Note:** MCP server is deprecated. Use CLI commands when MCP tools are unavailable.
-
-1. **Get project status** - Use `ijoka_status` MCP tool OR `ijoka status` CLI
+1. **Get project status** - Run `ijoka status`
 
 2. **Handle connection errors** - If Memgraph is not running:
    - Inform user: "Memgraph is not running. Start it with: `docker compose up -d`"
@@ -67,7 +65,7 @@ When the user runs this command:
    - Show category tag for each feature
    - Recommend next feature based on priority
 
-4. **If active feature has a plan** - Use `ijoka_get_plan` MCP tool OR `ijoka plan show` CLI
+4. **If active feature has a plan** - Run `ijoka plan show`
 
 5. **Suggest actions**:
    - If no active feature: "Run `/next-feature` to start working"

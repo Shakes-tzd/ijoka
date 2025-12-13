@@ -10,10 +10,8 @@ Registers the current project in Ijoka's Memgraph database and helps you define 
 
 Before running this command, ensure:
 1. **Memgraph is running**: `docker compose up -d` (from ijoka repo)
-2. **Ijoka CLI is installed**: `ijoka --version` should work (OR MCP tools available)
+2. **Ijoka CLI is installed**: `ijoka --version` should work
 3. **uv is installed**: `uv --version` should show 0.8.0+ for full Python support
-
-⚠️ **Note:** MCP server is deprecated. Prefer CLI commands for new projects.
 
 ## Usage
 
@@ -30,10 +28,10 @@ Claude will:
 2. Check if directory is a git repository (initialize if not)
 3. Detect existing agent config files (CLAUDE.md, GEMINI.md, etc.)
 4. Offer to add Python standards to config files
-5. Verify Memgraph connectivity via `ijoka_status`
+5. Verify Memgraph connectivity via `ijoka status`
 6. Ask about the project and its goals
 7. Help define initial features with categories
-8. Create features using `ijoka_create_feature` MCP tool
+8. Create features using `ijoka feature create`
 9. Explain the workflow for using Ijoka
 
 ## Feature Categories
@@ -132,7 +130,7 @@ python3 script.py
 
 ### Step 5: Check Connectivity
 
-- Use `ijoka_status` MCP tool OR `ijoka status` CLI to verify Memgraph is running
+- Run `ijoka status` to verify Memgraph is running
 - If connection fails, inform user to start Memgraph: `docker compose up -d`
 
 ### Step 6: Gather Project Info
@@ -149,18 +147,11 @@ Help identify 5-10 initial features:
 
 ### Step 8: Create Features
 
-For each feature, use `ijoka_create_feature` MCP tool OR CLI:
+For each feature:
 ```bash
-# MCP tool
-ijoka_create_feature:
-  description: "Feature description"
-  category: "functional|ui|security|etc"
-  steps: ["Step 1", "Step 2", ...]
-  priority: 100  # Decrease by 10 for each subsequent feature
-
-# OR CLI
 ijoka feature create --category "functional" --priority 100 "Feature description"
 ```
+Decrease priority by 10 for each subsequent feature.
 
 ### Step 9: Confirm Setup
 

@@ -30,13 +30,11 @@ Examples:
 4. Activates the target feature
 5. Confirms the switch
 
-⚠️ **Note:** MCP server is deprecated. Use CLI commands when MCP tools are unavailable.
-
 ## Instructions for Claude
 
 When the user runs this command or when you identify work relates to a specific feature:
 
-1. **Get all features** - Use `ijoka_status` MCP tool OR `ijoka status` CLI
+1. **Get all features** - Run `ijoka status`
 
 2. **Match the input** (from $ARGUMENTS) to a feature by:
    - Exact ID match
@@ -58,7 +56,7 @@ When the user runs this command or when you identify work relates to a specific 
    ```
    - Wait for user choice before proceeding
 
-5. **Activate the feature** - Use `ijoka_start_feature` MCP tool OR `ijoka feature start <ID>` CLI
+5. **Activate the feature** - Run `ijoka feature start <ID>`
    - Multiple features can be in_progress simultaneously
 
 6. **Confirm**: "Now tracking activity for: [feature description]"
@@ -68,7 +66,7 @@ When the user runs this command or when you identify work relates to a specific 
 Before working on any task, Claude should proactively:
 
 1. **Analyze the user's request** - What are they asking for?
-2. **Check features** - Use `ijoka_status` MCP tool OR `ijoka status` CLI
+2. **Check features** - Run `ijoka status`
 3. **Match by keywords** - Look for overlapping terms in descriptions
 4. **Consider completed features** - If the request relates to a "done" feature, use this command
 
@@ -90,7 +88,7 @@ B) Create a new 'Bug fix: Login form issue' feature"
 
 User: "A"
 
-Claude: [Uses ijoka_start_feature MCP or `ijoka feature start <ID>` CLI to reopen]
+Claude: [Runs `ijoka feature start <ID>` to reopen]
 Claude: "Now tracking activity for: User authentication with OAuth"
 [Proceeds to fix the bug, all tool calls are linked to this feature]
 ```

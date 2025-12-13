@@ -11,7 +11,7 @@ Runs quick diagnostics to catch configuration issues early.
 
 Architecture:
 - Memgraph = Single source of truth
-- ijoka CLI/API = Feature management interface (MCP is DEPRECATED)
+- ijoka CLI/API = Feature management interface
 - feature_list.json = DEPRECATED (no longer used)
 """
 
@@ -87,7 +87,7 @@ Add `--json` to any command for JSON output.
 3. **DRY Architecture** - Single source of truth via IjokaClient
 4. **Analytics** - Full analytics and insights system available
 
-⚠️ **MCP Server is DEPRECATED** - Use CLI or REST API instead."""
+The CLI provides the same operations as the Python scripts but with proper validation and error handling."""
 
 
 def get_head_commit(project_dir: str) -> Optional[str]:
