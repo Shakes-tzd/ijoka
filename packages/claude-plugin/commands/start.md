@@ -23,6 +23,22 @@ Run this command at the beginning of each Claude Code session for continuity.
 
 When the user runs `/ijoka:start`, you MUST:
 
+---
+
+### ⚠️ CRITICAL: FIRST ACTION
+
+**BEFORE doing anything else** - before reading files, running queries, or exploring the codebase:
+
+1. **VERIFY** you have `ijoka_status` in your available tools
+2. **CALL** `ijoka_status` MCP tool immediately
+3. **DO NOT** query databases, run Python scripts, or use internal APIs
+
+If `ijoka_status` is not available, tell the user: "MCP server doesn't appear to be connected. Please check the connection."
+
+**Why?** MCP tools provide validation, audit trails, and work across all AI clients. Direct database access bypasses these safeguards.
+
+---
+
 ### 1. Get Current Status
 Use the `ijoka_status` MCP tool to get:
 - Current project info

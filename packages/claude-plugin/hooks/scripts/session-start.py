@@ -27,6 +27,47 @@ sys.path.insert(0, str(Path(__file__).parent))
 import graph_db_helper as db_helper
 from git_utils import resolve_project_path
 
+# MCP-first enforcement notice - included in all session contexts
+# CRITICAL: This must appear FIRST in context to ensure Claude sees it before taking action
+MCP_ENFORCEMENT = """## ⚠️ CRITICAL: MCP Tools Required - Read This First
+
+**VERIFY:** Do you have `ijoka_status` in your available tools?
+- If YES → Use MCP tools exclusively (instructions below)
+- If NO → Ask user: "MCP server doesn't appear to be connected. Please check the connection."
+
+---
+
+### FIRST ACTION: Call `ijoka_status`
+
+Before doing ANYTHING else - before reading files, querying databases, or running scripts - call the `ijoka_status` MCP tool. This is the ONLY authorized way to get project state.
+
+---
+
+### Available MCP Tools
+
+| Tool | Purpose |
+|------|---------|
+| `ijoka_status` | **START HERE** - Get project status and active features |
+| `ijoka_start_feature` | Begin working on a feature |
+| `ijoka_complete_feature` | Mark feature as complete |
+| `ijoka_create_feature` | Create new features |
+| `ijoka_set_plan` / `ijoka_get_plan` | Plan management |
+| `ijoka_checkpoint` | Report progress |
+| `ijoka_record_insight` / `ijoka_get_insights` | Learning capture |
+
+---
+
+### Why MCP-First?
+
+**NEVER bypass MCP** by calling Python scripts, database queries, or internal APIs directly.
+
+1. **Validation** - MCP tools validate inputs and handle errors gracefully
+2. **Audit Trail** - All operations are logged for debugging and analysis
+3. **Client Agnostic** - Works across Claude Code, Codex, Gemini, and other AI clients
+4. **Abstraction** - Database implementation can change without breaking agents
+
+The hook that injected this context queried the database directly for convenience, but YOU must use MCP tools for all operations."""
+
 
 def get_head_commit(project_dir: str) -> Optional[str]:
     """Get current HEAD commit hash (short form)."""
@@ -343,6 +384,9 @@ def main():
         # Build rich context with previous session, step progress, and commits
         context_parts = []
 
+        # MCP enforcement FIRST - Claude must see this before anything else
+        context_parts.append(MCP_ENFORCEMENT)
+
         # Add previous session summary if available (what was done)
         prev_session = get_previous_session_summary(session_id, project_dir)
         has_history = prev_session is not None
@@ -398,6 +442,8 @@ After completing the current feature, these are queued:
         if diagnostic_section:
             context_parts.append(diagnostic_section)
 
+        # MCP enforcement already added FIRST (see above)
+
         context = "\n\n---\n\n".join(context_parts)
 
         # Build terminal status summary
@@ -427,7 +473,12 @@ After completing the current feature, these are queued:
         prev_session = get_previous_session_summary(session_id, project_dir)
         prev_section = f"\n\n---\n\n{prev_session}" if prev_session else ""
 
-        context = f"""## Session Continuity
+        # MCP enforcement FIRST - Claude must see this before anything else
+        context = f"""{MCP_ENFORCEMENT}
+
+---
+
+## Session Continuity
 
 **IMPORTANT:** At the start of this session, you MUST greet the user and provide a brief status update. Include:
 1. What was accomplished in the previous session (if any)
