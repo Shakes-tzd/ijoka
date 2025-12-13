@@ -455,18 +455,11 @@ def complete_feature(feature_id: str) -> Optional[dict]:
 
 def activate_feature(project_dir: str, feature_id: str) -> bool:
     """
-    Activate a feature and deactivate all others in the project.
+    Activate a feature (set to in_progress).
+    Multiple features can be in_progress simultaneously.
     Returns True if successful.
     """
-    # Deactivate all in_progress features for this project
-    run_write_query(
-        """
-        MATCH (f:Feature {status: 'in_progress'})-[:BELONGS_TO]->(p:Project {path: $projectPath})
-        SET f.status = 'pending', f.updated_at = datetime()
-        """,
-        {"projectPath": project_dir}
-    )
-    # Activate the target feature
+    # Activate the target feature (no longer deactivates others)
     results = run_write_query(
         """
         MATCH (f:Feature {id: $featureId})
@@ -512,16 +505,7 @@ def create_feature(
     # Ensure project exists
     get_or_create_project(project_dir)
 
-    # Deactivate other features if this one starts active
-    if in_progress:
-        run_write_query(
-            """
-            MATCH (f:Feature {status: 'in_progress'})-[:BELONGS_TO]->(p:Project {path: $projectPath})
-            SET f.status = 'pending', f.updated_at = datetime()
-            """,
-            {"projectPath": project_dir}
-        )
-
+    # Multiple features can be in_progress simultaneously (no deactivation needed)
     status = "in_progress" if in_progress else "pending"
     run_write_query(
         """

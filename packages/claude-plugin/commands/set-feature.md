@@ -57,7 +57,7 @@ When the user runs this command or when you identify work relates to a specific 
    - Wait for user choice before proceeding
 
 5. **Activate the feature** - Call `ijoka_start_feature` with the feature_id
-   - This automatically deactivates any other active feature
+   - Multiple features can be in_progress simultaneously
 
 6. **Confirm**: "Now tracking activity for: [feature description]"
 
