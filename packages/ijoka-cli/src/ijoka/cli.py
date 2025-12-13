@@ -1352,6 +1352,197 @@ def transcript_sync(
                 console.print(f"  - {err}")
 
 
+@transcript_app.command("tools")
+def transcript_tools(
+    days: Annotated[int, typer.Option("--days", "-d", help="Days to look back")] = 7,
+    project_path: Annotated[Optional[str], typer.Option("--project", "-p", help="Project path")] = None,
+    limit: Annotated[int, typer.Option("--limit", "-l", help="Max tools to show")] = 20,
+    json_output: Annotated[bool, typer.Option("--json", "-j", help="Output as JSON")] = False,
+):
+    """Show tool usage breakdown from transcripts (requires sync to Memgraph)."""
+    import sys
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent.parent.parent.parent / "claude-plugin" / "hooks" / "scripts"))
+
+    try:
+        from graph_db_helper import get_tool_usage_breakdown, is_connected
+    except ImportError:
+        console.print("[red]Error:[/red] graph_db_helper not available")
+        raise typer.Exit(1)
+
+    if not is_connected():
+        console.print("[red]Error:[/red] Memgraph not connected. Run `ijoka transcript sync` first.")
+        raise typer.Exit(1)
+
+    project = project_path or __import__("os").getcwd()
+    tools = get_tool_usage_breakdown(project, days=days)[:limit]
+
+    if json_output:
+        output_json({"success": True, "days": days, "tools": tools})
+        return
+
+    if not tools:
+        console.print(f"[yellow]No tool usage data for last {days} days.[/yellow]")
+        console.print("[dim]Run `ijoka transcript sync` to import transcript data.[/dim]")
+        return
+
+    table = Table(title=f"Tool Usage (Last {days} Days)")
+    table.add_column("Tool", style="cyan")
+    table.add_column("Count", justify="right")
+    table.add_column("Avg/Session", justify="right")
+
+    for t in tools:
+        table.add_row(
+            t["tool_name"],
+            str(t["count"]),
+            f"{t['avg_per_session']:.1f}"
+        )
+
+    console.print(table)
+
+
+@transcript_app.command("models")
+def transcript_models(
+    days: Annotated[int, typer.Option("--days", "-d", help="Days to look back")] = 7,
+    project_path: Annotated[Optional[str], typer.Option("--project", "-p", help="Project path")] = None,
+    json_output: Annotated[bool, typer.Option("--json", "-j", help="Output as JSON")] = False,
+):
+    """Show model usage breakdown from transcripts (requires sync to Memgraph)."""
+    import sys
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent.parent.parent.parent / "claude-plugin" / "hooks" / "scripts"))
+
+    try:
+        from graph_db_helper import get_model_usage_breakdown, is_connected
+    except ImportError:
+        console.print("[red]Error:[/red] graph_db_helper not available")
+        raise typer.Exit(1)
+
+    if not is_connected():
+        console.print("[red]Error:[/red] Memgraph not connected. Run `ijoka transcript sync` first.")
+        raise typer.Exit(1)
+
+    project = project_path or __import__("os").getcwd()
+    models = get_model_usage_breakdown(project, days=days)
+
+    if json_output:
+        output_json({"success": True, "days": days, "models": models})
+        return
+
+    if not models:
+        console.print(f"[yellow]No model usage data for last {days} days.[/yellow]")
+        console.print("[dim]Run `ijoka transcript sync` to import transcript data.[/dim]")
+        return
+
+    table = Table(title=f"Model Usage (Last {days} Days)")
+    table.add_column("Model", style="cyan")
+    table.add_column("Messages", justify="right")
+    table.add_column("Input Tokens", justify="right")
+    table.add_column("Output Tokens", justify="right")
+
+    for m in models:
+        table.add_row(
+            m["model"],
+            str(m["message_count"]),
+            f"{m['input_tokens']:,}",
+            f"{m['output_tokens']:,}"
+        )
+
+    console.print(table)
+
+
+@transcript_app.command("stats")
+def transcript_stats(
+    days: Annotated[int, typer.Option("--days", "-d", help="Days to look back")] = 7,
+    project_path: Annotated[Optional[str], typer.Option("--project", "-p", help="Project path")] = None,
+    json_output: Annotated[bool, typer.Option("--json", "-j", help="Output as JSON")] = False,
+):
+    """Show aggregate transcript statistics from Memgraph."""
+    import sys
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent.parent.parent.parent / "claude-plugin" / "hooks" / "scripts"))
+
+    try:
+        from graph_db_helper import get_transcript_stats, is_connected
+    except ImportError:
+        console.print("[red]Error:[/red] graph_db_helper not available")
+        raise typer.Exit(1)
+
+    if not is_connected():
+        console.print("[red]Error:[/red] Memgraph not connected. Run `ijoka transcript sync` first.")
+        raise typer.Exit(1)
+
+    project = project_path or __import__("os").getcwd()
+    stats = get_transcript_stats(project, days=days)
+
+    if json_output:
+        output_json({"success": True, **stats})
+        return
+
+    if stats["session_count"] == 0:
+        console.print(f"[yellow]No transcript data for last {days} days.[/yellow]")
+        console.print("[dim]Run `ijoka transcript sync` to import transcript data.[/dim]")
+        return
+
+    total_tokens = stats["total_input_tokens"] + stats["total_output_tokens"]
+
+    console.print(Panel(
+        f"[bold]Period:[/bold] Last {days} days\n"
+        f"[bold]Sessions:[/bold] {stats['session_count']}\n"
+        f"[bold]Entries:[/bold] {stats['total_entries']:,}\n\n"
+        f"[bold]Input Tokens:[/bold] {stats['total_input_tokens']:,}\n"
+        f"[bold]Output Tokens:[/bold] {stats['total_output_tokens']:,}\n"
+        f"[bold]Total Tokens:[/bold] {total_tokens:,}\n\n"
+        f"[bold]Cache Creation:[/bold] {stats['total_cache_creation_tokens']:,}\n"
+        f"[bold]Cache Read:[/bold] {stats['total_cache_read_tokens']:,}",
+        title="Transcript Statistics (from Memgraph)",
+        border_style="blue",
+    ))
+
+
+@transcript_app.command("entries")
+def transcript_entries(
+    session_id: Annotated[str, typer.Argument(help="Session ID to view entries for")],
+    entry_type: Annotated[Optional[str], typer.Option("--type", "-t", help="Filter by type (user/assistant)")] = None,
+    limit: Annotated[int, typer.Option("--limit", "-l", help="Max entries to show")] = 20,
+    json_output: Annotated[bool, typer.Option("--json", "-j", help="Output as JSON")] = False,
+):
+    """View transcript entries for a session (requires sync to Memgraph)."""
+    import sys
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent.parent.parent.parent / "claude-plugin" / "hooks" / "scripts"))
+
+    try:
+        from graph_db_helper import get_transcript_entries, is_connected
+    except ImportError:
+        console.print("[red]Error:[/red] graph_db_helper not available")
+        raise typer.Exit(1)
+
+    if not is_connected():
+        console.print("[red]Error:[/red] Memgraph not connected. Run `ijoka transcript sync` first.")
+        raise typer.Exit(1)
+
+    entries = get_transcript_entries(session_id, entry_type=entry_type, limit=limit)
+
+    if json_output:
+        output_json({"success": True, "session_id": session_id, "entries": entries})
+        return
+
+    if not entries:
+        console.print(f"[yellow]No entries found for session {session_id}.[/yellow]")
+        return
+
+    for entry in entries:
+        etype = entry.get("entry_type", "unknown")
+        content = entry.get("content", "")[:200]
+        model = entry.get("model", "")
+        tool_count = entry.get("tool_call_count", 0)
+
+        if etype == "user":
+            console.print(f"[bold blue]USER:[/bold blue] {content}...")
+        elif etype == "assistant":
+            model_str = f" ({model})" if model else ""
+            tools_str = f" [{tool_count} tools]" if tool_count else ""
+            console.print(f"[bold green]ASSISTANT{model_str}{tools_str}:[/bold green] {content}...")
+        console.print()
+
+
 # =============================================================================
 # HELP COMMAND
 # =============================================================================

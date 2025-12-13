@@ -808,6 +808,232 @@ async def get_insight_effectiveness():
 
 
 # =============================================================================
+# TRANSCRIPT ENDPOINTS
+# =============================================================================
+
+
+class TranscriptSyncRequest(BaseModel):
+    """Request to sync transcripts."""
+    session_id: Optional[str] = Field(default=None, description="Specific session to sync")
+    limit: int = Field(default=50, ge=1, le=500, description="Max sessions to sync")
+    clear_existing: bool = Field(default=False, description="Clear existing data before sync")
+
+
+class TranscriptStatsResponse(BaseModel):
+    """Response for transcript statistics."""
+    success: bool = True
+    session_count: int
+    total_entries: int
+    total_input_tokens: int
+    total_output_tokens: int
+    total_cache_creation_tokens: int
+    total_cache_read_tokens: int
+    days: int
+
+
+class ToolUsageResponse(BaseModel):
+    """Response for tool usage breakdown."""
+    success: bool = True
+    days: int
+    tools: list[dict]
+
+
+class ModelUsageResponse(BaseModel):
+    """Response for model usage breakdown."""
+    success: bool = True
+    days: int
+    models: list[dict]
+
+
+class TranscriptEntriesResponse(BaseModel):
+    """Response for transcript entries."""
+    success: bool = True
+    session_id: str
+    entries: list[dict]
+    count: int
+
+
+class TranscriptSyncResponse(BaseModel):
+    """Response for transcript sync."""
+    success: bool = True
+    total_sessions: int
+    synced: int
+    failed: int
+    total_entries: int
+    total_tool_uses: int
+    errors: list[str] = Field(default_factory=list)
+
+
+def _get_graph_helper():
+    """Import and return graph_db_helper module."""
+    import sys
+    from pathlib import Path
+
+    # Add path to graph_db_helper
+    scripts_path = Path(__file__).parent.parent.parent.parent / "claude-plugin" / "hooks" / "scripts"
+    if str(scripts_path) not in sys.path:
+        sys.path.insert(0, str(scripts_path))
+
+    try:
+        import graph_db_helper
+        return graph_db_helper
+    except ImportError:
+        raise HTTPException(status_code=503, detail="graph_db_helper not available")
+
+
+@app.get("/transcripts/stats", response_model=TranscriptStatsResponse, tags=["Transcripts"])
+async def get_transcript_stats(
+    days: int = Query(default=7, ge=1, le=365, description="Days to look back"),
+    project_path: Optional[str] = Query(default=None, description="Project path"),
+):
+    """Get aggregate transcript statistics from Memgraph."""
+    import os
+
+    db = _get_graph_helper()
+    if not db.is_connected():
+        raise HTTPException(status_code=503, detail="Memgraph not connected")
+
+    project = project_path or os.getcwd()
+    stats = db.get_transcript_stats(project, days=days)
+
+    return TranscriptStatsResponse(**stats)
+
+
+@app.get("/transcripts/tools", response_model=ToolUsageResponse, tags=["Transcripts"])
+async def get_tool_usage(
+    days: int = Query(default=7, ge=1, le=365, description="Days to look back"),
+    project_path: Optional[str] = Query(default=None, description="Project path"),
+    limit: int = Query(default=20, ge=1, le=100, description="Max tools to return"),
+):
+    """Get tool usage breakdown from transcripts."""
+    import os
+
+    db = _get_graph_helper()
+    if not db.is_connected():
+        raise HTTPException(status_code=503, detail="Memgraph not connected")
+
+    project = project_path or os.getcwd()
+    tools = db.get_tool_usage_breakdown(project, days=days)[:limit]
+
+    return ToolUsageResponse(days=days, tools=tools)
+
+
+@app.get("/transcripts/models", response_model=ModelUsageResponse, tags=["Transcripts"])
+async def get_model_usage(
+    days: int = Query(default=7, ge=1, le=365, description="Days to look back"),
+    project_path: Optional[str] = Query(default=None, description="Project path"),
+):
+    """Get model usage breakdown from transcripts."""
+    import os
+
+    db = _get_graph_helper()
+    if not db.is_connected():
+        raise HTTPException(status_code=503, detail="Memgraph not connected")
+
+    project = project_path or os.getcwd()
+    models = db.get_model_usage_breakdown(project, days=days)
+
+    return ModelUsageResponse(days=days, models=models)
+
+
+@app.get("/transcripts/sessions/{session_id}/entries", response_model=TranscriptEntriesResponse, tags=["Transcripts"])
+async def get_transcript_entries(
+    session_id: str = Path(..., description="Session ID"),
+    entry_type: Optional[str] = Query(default=None, description="Filter by type (user/assistant)"),
+    limit: int = Query(default=100, ge=1, le=500, description="Max entries to return"),
+    offset: int = Query(default=0, ge=0, description="Pagination offset"),
+):
+    """Get transcript entries for a specific session."""
+    db = _get_graph_helper()
+    if not db.is_connected():
+        raise HTTPException(status_code=503, detail="Memgraph not connected")
+
+    entries = db.get_transcript_entries(session_id, entry_type=entry_type, limit=limit, offset=offset)
+
+    return TranscriptEntriesResponse(
+        session_id=session_id,
+        entries=entries,
+        count=len(entries),
+    )
+
+
+@app.get("/transcripts/sessions/{session_id}", tags=["Transcripts"])
+async def get_transcript_session(session_id: str = Path(..., description="Session ID")):
+    """Get transcript session details."""
+    db = _get_graph_helper()
+    if not db.is_connected():
+        raise HTTPException(status_code=503, detail="Memgraph not connected")
+
+    session = db.get_transcript_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Transcript session not found: {session_id}")
+
+    return {"success": True, "session": session}
+
+
+@app.post("/transcripts/sync", response_model=TranscriptSyncResponse, tags=["Transcripts"])
+async def sync_transcripts(request: TranscriptSyncRequest):
+    """Sync transcript data to Memgraph."""
+    import os
+    from .transcript import (
+        TranscriptParser,
+        sync_transcript_to_graph,
+        sync_all_transcripts_to_graph
+    )
+
+    db = _get_graph_helper()
+    if not db.is_connected():
+        raise HTTPException(status_code=503, detail="Memgraph not connected")
+
+    project_path = os.getcwd()
+
+    if request.session_id:
+        # Sync single session
+        parser = TranscriptParser(project_path)
+        result = sync_transcript_to_graph(
+            parser=parser,
+            session_id=request.session_id,
+            clear_existing=request.clear_existing
+        )
+
+        if result.get("error"):
+            raise HTTPException(status_code=400, detail=result["error"])
+
+        return TranscriptSyncResponse(
+            total_sessions=1,
+            synced=1 if result.get("success") else 0,
+            failed=0 if result.get("success") else 1,
+            total_entries=result.get("entries_synced", 0),
+            total_tool_uses=result.get("tool_uses_synced", 0),
+            errors=result.get("errors", []),
+        )
+    else:
+        # Sync all sessions
+        result = sync_all_transcripts_to_graph(
+            project_path=project_path,
+            limit=request.limit,
+            clear_existing=request.clear_existing
+        )
+
+        return TranscriptSyncResponse(**result)
+
+
+@app.get("/transcripts/sessions/{session_id}/tools", tags=["Transcripts"])
+async def get_session_tool_uses(
+    session_id: str = Path(..., description="Session ID"),
+    tool_name: Optional[str] = Query(default=None, description="Filter by tool name"),
+):
+    """Get tool uses from a specific transcript session."""
+    db = _get_graph_helper()
+    if not db.is_connected():
+        raise HTTPException(status_code=503, detail="Memgraph not connected")
+
+    tools = db.get_transcript_tool_uses(session_id, tool_name=tool_name)
+
+    return {"success": True, "session_id": session_id, "tool_uses": tools, "count": len(tools)}
+
+
+# =============================================================================
 # SERVER ENTRY POINT
 # =============================================================================
 
