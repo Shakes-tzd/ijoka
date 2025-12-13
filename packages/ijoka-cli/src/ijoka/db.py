@@ -757,7 +757,7 @@ class IjokaClient:
 
                 if step.status == StepStatus.IN_PROGRESS:
                     active_step = step
-                elif step.status == StepStatus.COMPLETE:
+                elif step.status == StepStatus.COMPLETED:
                     completed_count += 1
 
             total = len(steps)
