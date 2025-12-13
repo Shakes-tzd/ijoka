@@ -1,0 +1,64 @@
+metadata:
+  name: "Alignment System"
+  created: "20251213-143000"
+  status: "ready"
+
+overview: |
+  Wire up existing drift detection code, add feature-level alignment fallback,
+  and surface warnings via additionalContext. Most infrastructure exists -
+  this plan connects the pieces and adds missing fallbacks.
+
+research:
+  approach: "Hybrid Plan-Observation with keyword alignment (no embeddings)"
+  libraries:
+    - name: "None needed"
+      reason: "All dependencies already in place"
+  patterns:
+    - file: "packages/claude-plugin/hooks/scripts/track-event.py:162"
+      description: "Existing calculate_drift() function"
+    - file: "packages/claude-plugin/hooks/scripts/track-event.py:460"
+      description: "Existing handle_todowrite() function"
+    - file: "packages/claude-plugin/hooks/scripts/graph_db_helper.py:1353"
+      description: "Nudge tracking pattern (has_been_nudged/record_nudge)"
+
+features:
+  - "feature-level-alignment"
+  - "todowrite-step-verification"
+  - "drift-warning-injection"
+  - "session-work-accumulator"
+
+tasks:
+  - id: "task-0"
+    name: "Feature-Level Alignment Calculator"
+    file: "tasks/task-0.md"
+    priority: "high"
+    dependencies: []
+
+  - id: "task-1"
+    name: "Verify TodoWrite → Steps Sync"
+    file: "tasks/task-1.md"
+    priority: "high"
+    dependencies: []
+
+  - id: "task-2"
+    name: "Wire Drift Warnings to additionalContext"
+    file: "tasks/task-2.md"
+    priority: "blocker"
+    dependencies: []
+
+  - id: "task-3"
+    name: "Session Work Accumulator Alert"
+    file: "tasks/task-3.md"
+    priority: "medium"
+    dependencies: ["task-2"]
+
+shared_resources:
+  files:
+    - path: "packages/claude-plugin/hooks/scripts/track-event.py"
+      reason: "All tasks modify this file"
+      mitigation: "Execute sequentially to avoid conflicts"
+
+success_criteria:
+  - "Drift warnings appear in additionalContext"
+  - "Session Work alerts when > 20 events"
+  - "Feature-level alignment works without Steps"

@@ -14,9 +14,10 @@ import os
 import sys
 from pathlib import Path
 
-# Import shared database helper
+# Import shared helpers
 sys.path.insert(0, str(Path(__file__).parent))
 import graph_db_helper as db_helper
+from git_utils import resolve_project_path
 
 
 def main():
@@ -26,7 +27,13 @@ def main():
         hook_input = {}
 
     session_id = hook_input.get("session_id") or os.environ.get("CLAUDE_SESSION_ID", "unknown")
-    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+
+    # Resolve project path using git-aware resolution
+    # In Ijoka, PROJECT = GIT REPOSITORY - all subdirectories belong to the same project
+    project_dir = resolve_project_path(
+        cwd=hook_input.get("cwd"),
+        env_var=os.environ.get("CLAUDE_PROJECT_DIR")
+    )
 
     # End session in database
     db_helper.end_session(session_id)

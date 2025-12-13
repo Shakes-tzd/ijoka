@@ -1,70 +1,74 @@
 # /set-feature
 
-Explicitly set the active feature for activity tracking, including reopening completed features.
+Explicitly set the active feature for activity tracking in the Ijoka graph database.
 
 ## When to Use
 
 - When starting work that relates to a specific feature
 - When the user's request relates to an existing feature (even if completed)
 - When you need to reopen a completed feature for additional work
-- When creating follow-up work for a completed feature
+- When switching between features
 
 ## Usage
 
 ```
-/set-feature <description or index>
+/set-feature <description or ID>
 ```
 
 Examples:
 - `/set-feature User authentication` - Match by description
-- `/set-feature 3` - Set feature at index 3
-- `/set-feature security:0` - First security feature
+- `/set-feature abc123` - Set by feature ID
+- `/set-feature security:input` - Match security features containing "input"
 
 ## What This Command Does
 
-1. Reads `feature_list.json`
-2. Finds the matching feature
-3. If the feature is already complete (`passes: true`):
-   - Prompts: "This feature is marked complete. Would you like to:"
-     - A) Reopen it (set `passes: false`, `inProgress: true`)
-     - B) Create a follow-up feature
-4. Sets `inProgress: true` on the target feature
-5. Clears `inProgress` from any other features
-6. Confirms the active feature
-
-## Smart Feature Detection
-
-Before working on any task, Claude should:
-
-1. **Analyze the user's request** - What are they asking for?
-2. **Check feature_list.json** - Does this relate to an existing feature?
-3. **Match by keywords** - Look for overlapping terms in descriptions
-4. **Consider completed features** - If the request relates to a "done" feature, it may need reopening
+1. Queries Memgraph for matching features via `ijoka_status`
+2. Finds the best match based on input
+3. If feature is complete, offers options:
+   - A) Reopen it (set back to in_progress)
+   - B) Create a follow-up feature
+4. Calls `ijoka_start_feature` to activate the target feature
+5. Confirms the switch
 
 ## Instructions for Claude
 
-When the user runs this command or when you identify that work relates to a specific feature:
+When the user runs this command or when you identify work relates to a specific feature:
 
-1. Read `feature_list.json` and list all features with their status
-2. Match the input to a feature by:
-   - Exact index number
-   - Partial description match
-   - Category prefix (e.g., "security:0")
-3. If no match found, suggest similar features or offer to create new
-4. If matching a completed feature:
+1. **Get all features** - Call `ijoka_status`
+
+2. **Match the input** (from $ARGUMENTS) to a feature by:
+   - Exact ID match
+   - Partial description match (fuzzy)
+   - Category prefix (e.g., "security:0" = first security feature)
+
+3. **If no match found**:
+   - List similar features if any
+   - Offer to create new feature with `/add-feature`
+
+4. **If matching a completed feature**:
    ```
    This feature is marked complete:
-   - "User authentication with OAuth" ✅
+   - "User authentication with OAuth"
 
    Options:
-   A) Reopen for additional work
+   A) Reopen for additional work (bug fix, enhancement)
    B) Create follow-up: "Fix/enhance: User authentication with OAuth"
    ```
-5. Update feature_list.json:
-   - Clear `inProgress` from all features
-   - Set `inProgress: true` on target feature
-   - If reopening: set `passes: false`
-6. Confirm: "Now tracking activity for: [feature description]"
+   - Wait for user choice before proceeding
+
+5. **Activate the feature** - Call `ijoka_start_feature` with the feature_id
+   - This automatically deactivates any other active feature
+
+6. **Confirm**: "Now tracking activity for: [feature description]"
+
+## Smart Feature Detection
+
+Before working on any task, Claude should proactively:
+
+1. **Analyze the user's request** - What are they asking for?
+2. **Check features via ijoka_status** - Does this relate to an existing feature?
+3. **Match by keywords** - Look for overlapping terms in descriptions
+4. **Consider completed features** - If the request relates to a "done" feature, use this command
 
 ## Example Flow
 
@@ -84,7 +88,7 @@ B) Create a new 'Bug fix: Login form issue' feature"
 
 User: "A"
 
-Claude: [Updates feature_list.json to reopen]
+Claude: [Calls ijoka_start_feature to reopen]
 Claude: "Now tracking activity for: User authentication with OAuth"
 [Proceeds to fix the bug, all tool calls are linked to this feature]
 ```

@@ -127,6 +127,14 @@ export interface Feature {
   work_count: number;
   assigned_agent?: string;
   block_reason?: string;
+  // Agent-scoped claiming fields (P1)
+  claiming_session_id?: string;
+  claiming_agent?: string;
+  claimed_at?: string;
+  // Branch-feature affinity (P2)
+  branch_hint?: string;
+  // File path patterns for automatic classification (P2)
+  file_patterns?: string[];
 }
 
 export interface AgentSession {
@@ -207,6 +215,14 @@ function nodeToFeature(node: Record<string, unknown>): Feature {
     work_count: Number(f.work_count) || 0,
     assigned_agent: f.assigned_agent as string | undefined,
     block_reason: f.block_reason as string | undefined,
+    // Agent-scoped claiming fields
+    claiming_session_id: f.claiming_session_id as string | undefined,
+    claiming_agent: f.claiming_agent as string | undefined,
+    claimed_at: f.claimed_at?.toString(),
+    // Branch-feature affinity
+    branch_hint: f.branch_hint as string | undefined,
+    // File path patterns
+    file_patterns: f.file_patterns as string[] | undefined,
   };
 }
 
@@ -327,9 +343,122 @@ export async function getNextFeature(projectPath: string): Promise<Feature | nul
   return results.length > 0 ? nodeToFeature(results[0]) : null;
 }
 
-export async function startFeature(featureId: string, agent?: string): Promise<Feature | null> {
+/**
+ * Check if a session is still active (has recent activity).
+ * A session is considered stale if it has no activity in the last 30 minutes.
+ */
+export async function isSessionActive(sessionId: string, staleMinutes: number = 30): Promise<boolean> {
+  if (!sessionId) return false;
+
+  const durationStr = `PT${staleMinutes}M`;
+  const results = await runQuery<{ isActive: boolean }>(
+    `
+    MATCH (s:Session {id: $sessionId})
+    RETURN s.last_activity > datetime() - duration($durationStr) as isActive
+    `,
+    { sessionId, durationStr }
+  );
+
+  if (results.length === 0) {
+    // No session found - check if there are recent events with this session_id
+    const eventResults = await runQuery<{ hasRecent: boolean }>(
+      `
+      MATCH (e:Event {session_id: $sessionId})
+      WHERE e.timestamp > datetime() - duration($durationStr)
+      RETURN count(e) > 0 as hasRecent
+      `,
+      { sessionId, durationStr }
+    );
+    return eventResults[0]?.hasRecent || false;
+  }
+
+  return results[0]?.isActive || false;
+}
+
+/**
+ * Get the current claim on a feature, if any.
+ */
+export async function getFeatureClaim(featureId: string): Promise<{
+  sessionId: string;
+  agent: string;
+  claimedAt: string;
+} | null> {
+  const results = await runQuery<Record<string, unknown>>(
+    `
+    MATCH (f:Feature {id: $featureId})
+    WHERE f.claiming_session_id IS NOT NULL
+    RETURN f.claiming_session_id as sessionId,
+           f.claiming_agent as agent,
+           f.claimed_at as claimedAt
+    `,
+    { featureId }
+  );
+
+  if (results.length === 0 || !results[0].sessionId) {
+    return null;
+  }
+
+  return {
+    sessionId: results[0].sessionId as string,
+    agent: results[0].agent as string,
+    claimedAt: results[0].claimedAt?.toString() || '',
+  };
+}
+
+export interface StartFeatureOptions {
+  agent?: string;
+  sessionId?: string;
+  forceOverride?: boolean;  // Override existing claim (use with caution)
+}
+
+export interface StartFeatureResult {
+  feature: Feature | null;
+  conflict?: {
+    claimedBy: string;
+    sessionId: string;
+    claimedAt: string;
+    isStale: boolean;
+  };
+}
+
+export async function startFeature(
+  featureId: string,
+  agentOrOptions?: string | StartFeatureOptions
+): Promise<Feature | null> {
   if (!featureId) {
     throw new Error('featureId is required');
+  }
+
+  // Handle both old signature (agent string) and new signature (options object)
+  const options: StartFeatureOptions = typeof agentOrOptions === 'string'
+    ? { agent: agentOrOptions }
+    : agentOrOptions || {};
+
+  const agent = options.agent || 'unknown';
+  const sessionId = options.sessionId || `session-${Date.now()}`;
+  const forceOverride = options.forceOverride || false;
+
+  // Check for existing claim
+  const existingClaim = await getFeatureClaim(featureId);
+  if (existingClaim && existingClaim.sessionId !== sessionId) {
+    // Check if the claiming session is still active
+    const isClaimActive = await isSessionActive(existingClaim.sessionId);
+
+    if (isClaimActive && !forceOverride) {
+      // Conflict! Return null but log the conflict
+      console.error(
+        `[ijoka-mcp] Feature claim conflict: ${featureId} is claimed by ` +
+        `${existingClaim.agent} (session: ${existingClaim.sessionId})`
+      );
+      // We return null here - the handler should check and provide a meaningful error
+      return null;
+    }
+
+    // Stale claim - we can override
+    console.error(
+      `[ijoka-mcp] Overriding stale claim on ${featureId} ` +
+      `(was claimed by ${existingClaim.agent}, session inactive)`
+    );
   }
 
   // Get current status for StatusEvent
@@ -342,15 +471,19 @@ export async function startFeature(featureId: string, agent?: string): Promise<F
   // Create StatusEvent for audit trail
   await createStatusEvent(featureId, fromStatus, 'in_progress', 'mcp:ijoka_start_feature', agent);
 
+  // Start the feature with claiming information
   const results = await runWriteQuery<Record<string, unknown>>(
     `
     MATCH (f:Feature {id: $featureId})
     SET f.status = 'in_progress',
         f.assigned_agent = $agent,
+        f.claiming_session_id = $sessionId,
+        f.claiming_agent = $agent,
+        f.claimed_at = datetime(),
         f.updated_at = datetime()
     RETURN f
     `,
-    { featureId, agent: agent || null }
+    { featureId, agent, sessionId }
   );
   if (results.length === 0) {
     return null;
@@ -407,12 +540,16 @@ export async function completeFeature(featureId: string): Promise<Feature | null
   // Create StatusEvent for audit trail
   await createStatusEvent(featureId, fromStatus, 'complete', 'mcp:ijoka_complete_feature');
 
+  // Complete the feature and clear claiming info
   const results = await runWriteQuery<Record<string, unknown>>(
     `
     MATCH (f:Feature {id: $featureId})
     SET f.status = 'complete',
         f.completed_at = datetime(),
-        f.updated_at = datetime()
+        f.updated_at = datetime(),
+        f.claiming_session_id = null,
+        f.claiming_agent = null,
+        f.claimed_at = null
     RETURN f
     `,
     { featureId }
@@ -476,6 +613,8 @@ export async function createFeature(
     category: string;
     steps?: string[];
     priority?: number;
+    branch_hint?: string;
+    file_patterns?: string[];
   }
 ): Promise<Feature> {
   const id = randomUUID();
@@ -489,6 +628,8 @@ export async function createFeature(
       status: 'pending',
       priority: $priority,
       steps: $steps,
+      branch_hint: $branchHint,
+      file_patterns: $filePatterns,
       created_at: datetime(),
       updated_at: datetime(),
       work_count: 0
@@ -502,6 +643,8 @@ export async function createFeature(
       category: feature.category,
       steps: feature.steps || [],
       priority: feature.priority || 0,
+      branchHint: feature.branch_hint || null,
+      filePatterns: feature.file_patterns || [],
     }
   );
   return nodeToFeature(results[0]);
@@ -564,6 +707,59 @@ export async function getFeatureById(featureId: string): Promise<Feature | null>
   const results = await runQuery<Record<string, unknown>>(
     'MATCH (f:Feature {id: $featureId}) RETURN f',
     { featureId }
+  );
+  return results.length > 0 ? nodeToFeature(results[0]) : null;
+}
+
+/**
+ * Classify a file path by matching against feature file_patterns.
+ * Uses minimatch for glob pattern matching.
+ *
+ * @param projectPath - Project directory path
+ * @param filePath - File path to classify (relative to project)
+ * @returns Feature ID and confidence score, or null if no match
+ */
+export async function classifyByFilePath(
+  projectPath: string,
+  filePath: string
+): Promise<{ featureId: string; confidence: number } | null> {
+  // Import minimatch dynamically
+  const { minimatch } = await import('minimatch');
+
+  // Get all features with file_patterns
+  const features = await getFeaturesForProject(projectPath);
+  const featuresWithPatterns = features.filter(
+    (f) => f.file_patterns && f.file_patterns.length > 0
+  );
+
+  if (featuresWithPatterns.length === 0) {
+    return null;
+  }
+
+  // Find best matching feature
+  for (const feature of featuresWithPatterns) {
+    for (const pattern of feature.file_patterns || []) {
+      if (minimatch(filePath, pattern, { dot: true })) {
+        return {
+          featureId: feature.id,
+          confidence: 0.8,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+export async function getFeatureByBranch(projectPath: string, branch: string): Promise<Feature | null> {
+  const results = await runQuery<Record<string, unknown>>(
+    `
+    MATCH (f:Feature)-[:BELONGS_TO]->(p:Project {path: $projectPath})
+    WHERE f.branch_hint = $branch
+    RETURN f
+    LIMIT 1
+    `,
+    { projectPath, branch }
   );
   return results.length > 0 ? nodeToFeature(results[0]) : null;
 }
@@ -931,6 +1127,73 @@ export async function recordMcpActivity(
   );
 
   console.error(`[ijoka-mcp] Recorded activity: ${toolName} (agent: ${sourceAgent}) -> Session Work feature`);
+}
+
+/**
+ * Re-attribute recent Session Work events to a new feature (bidirectional linking).
+ * Events remain linked to Session Work AND get linked to the new feature.
+ *
+ * @param projectPath - Project directory path
+ * @param featureId - Feature to link events to
+ * @param lookbackMinutes - How many minutes back to look for events
+ * @returns Number of events re-attributed
+ */
+export async function reattributeSessionWorkEvents(
+  projectPath: string,
+  featureId: string,
+  lookbackMinutes: number = 60
+): Promise<number> {
+  // Find events linked to Session Work within the lookback window
+  // Only include tool calls that represent real work (not MCP meta tools)
+  const workToolNames = [
+    'Edit', 'Write', 'Read', 'Bash', 'Grep', 'Glob', 'Task',
+    'TodoWrite', 'TodoRead', 'WebSearch', 'WebFetch', 'NotebookEdit'
+  ];
+
+  // Memgraph uses ISO 8601 duration format: PT{minutes}M
+  const durationStr = `PT${lookbackMinutes}M`;
+  const results = await runQuery<{ eventId: string }>(
+    `
+    MATCH (e:Event)-[:LINKED_TO]->(sw:Feature {is_session_work: true})-[:BELONGS_TO]->(p:Project {path: $projectPath})
+    WHERE e.timestamp > datetime() - duration($durationStr)
+    AND e.tool_name IN $workToolNames
+    RETURN e.id as eventId
+    `,
+    { projectPath, durationStr, workToolNames }
+  );
+
+  if (results.length === 0) {
+    return 0;
+  }
+
+  // Create LINKED_TO relationships to the new feature (bidirectional - keeps Session Work link)
+  let linkedCount = 0;
+  for (const { eventId } of results) {
+    if (eventId) {
+      await runWriteQuery(
+        `
+        MATCH (e:Event {id: $eventId})
+        MATCH (f:Feature {id: $featureId})
+        MERGE (e)-[:LINKED_TO]->(f)
+        `,
+        { eventId, featureId }
+      );
+      linkedCount++;
+    }
+  }
+
+  // Update work_count on the new feature
+  await runWriteQuery(
+    `
+    MATCH (f:Feature {id: $featureId})
+    SET f.work_count = f.work_count + $linkedCount,
+        f.updated_at = datetime()
+    `,
+    { featureId, linkedCount }
+  );
+
+  console.error(`[ijoka-mcp] Re-attributed ${linkedCount} events to feature ${featureId}`);
+  return linkedCount;
 }
 
 // =============================================================================

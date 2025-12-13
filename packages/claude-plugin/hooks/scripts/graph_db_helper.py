@@ -18,12 +18,17 @@ import json
 import os
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 import time
 
 from neo4j import GraphDatabase, Driver
 from neo4j.exceptions import ServiceUnavailable, AuthError, TransientError
+
+# NOTE: Git utilities are in git_utils.py (no external dependencies)
+# Import directly: `from git_utils import resolve_project_path`
+# DO NOT import git functions from this module - they are not re-exported
 
 
 # =============================================================================
@@ -303,29 +308,144 @@ def get_next_feature(project_dir: str) -> Optional[dict]:
     return _node_to_dict(results[0], "f") if results else None
 
 
-def start_feature(feature_id: str, agent: Optional[str] = None) -> Optional[dict]:
-    """Start a feature (set status to 'in_progress')."""
+def get_feature_by_branch(project_dir: str, branch: str) -> Optional[dict]:
+    """Get a feature by its branch hint."""
+    results = run_query(
+        """
+        MATCH (f:Feature)-[:BELONGS_TO]->(p:Project {path: $projectPath})
+        WHERE f.branch_hint = $branch
+        RETURN f
+        LIMIT 1
+        """,
+        {"projectPath": project_dir, "branch": branch}
+    )
+    if not results:
+        return None
+    f = _node_to_dict(results[0], "f")
+    # Convert graph status to db_helper format for compatibility
+    status = f.get("status", "pending")
+    f["passes"] = status == "complete"
+    f["inProgress"] = status == "in_progress"
+    f["workCount"] = f.get("work_count", 0)
+    return f
+
+
+def is_session_active(session_id: str, stale_minutes: int = 30) -> bool:
+    """
+    Check if a session is still active (has recent activity).
+    A session is considered stale if it has no activity in the last N minutes.
+    """
+    if not session_id:
+        return False
+
+    duration_str = f"PT{stale_minutes}M"
+
+    # Check Session node
+    results = run_query(
+        """
+        MATCH (s:Session {id: $sessionId})
+        RETURN s.last_activity > datetime() - duration($durationStr) as isActive
+        """,
+        {"sessionId": session_id, "durationStr": duration_str}
+    )
+
+    if results and results[0].get("isActive"):
+        return True
+
+    # Fallback: check recent events with this session_id
+    event_results = run_query(
+        """
+        MATCH (e:Event {session_id: $sessionId})
+        WHERE e.timestamp > datetime() - duration($durationStr)
+        RETURN count(e) > 0 as hasRecent
+        """,
+        {"sessionId": session_id, "durationStr": duration_str}
+    )
+
+    return event_results[0].get("hasRecent", False) if event_results else False
+
+
+def get_feature_claim(feature_id: str) -> Optional[dict]:
+    """Get the current claim on a feature, if any."""
+    results = run_query(
+        """
+        MATCH (f:Feature {id: $featureId})
+        WHERE f.claiming_session_id IS NOT NULL
+        RETURN f.claiming_session_id as sessionId,
+               f.claiming_agent as agent,
+               f.claimed_at as claimedAt
+        """,
+        {"featureId": feature_id}
+    )
+
+    if not results or not results[0].get("sessionId"):
+        return None
+
+    return {
+        "session_id": results[0].get("sessionId"),
+        "agent": results[0].get("agent"),
+        "claimed_at": str(results[0].get("claimedAt", ""))
+    }
+
+
+def start_feature(
+    feature_id: str,
+    agent: Optional[str] = None,
+    session_id: Optional[str] = None,
+    force_override: bool = False
+) -> Optional[dict]:
+    """
+    Start a feature (set status to 'in_progress') with claim tracking.
+
+    Args:
+        feature_id: Feature to start
+        agent: Agent identifier
+        session_id: Session identifier for claim tracking
+        force_override: Override existing active claims
+
+    Returns:
+        Feature dict if successful, None if conflict or not found
+    """
+    session_id = session_id or f"session-{int(datetime.now().timestamp() * 1000)}"
+
+    # Check for existing claim
+    existing_claim = get_feature_claim(feature_id)
+    if existing_claim and existing_claim["session_id"] != session_id:
+        is_claim_active = is_session_active(existing_claim["session_id"])
+
+        if is_claim_active and not force_override:
+            # Conflict!
+            return None
+
+        # Stale claim - will be overridden
+
     results = run_write_query(
         """
         MATCH (f:Feature {id: $featureId})
         SET f.status = 'in_progress',
             f.assigned_agent = $agent,
+            f.claiming_session_id = $sessionId,
+            f.claiming_agent = $agent,
+            f.claimed_at = datetime(),
             f.updated_at = datetime()
         RETURN f
         """,
-        {"featureId": feature_id, "agent": agent}
+        {"featureId": feature_id, "agent": agent, "sessionId": session_id}
     )
     return _node_to_dict(results[0], "f") if results else None
 
 
 def complete_feature(feature_id: str) -> Optional[dict]:
-    """Mark a feature as complete."""
+    """Mark a feature as complete and clear claiming info."""
     results = run_write_query(
         """
         MATCH (f:Feature {id: $featureId})
         SET f.status = 'complete',
             f.completed_at = datetime(),
-            f.updated_at = datetime()
+            f.updated_at = datetime(),
+            f.claiming_session_id = null,
+            f.claiming_agent = null,
+            f.claimed_at = null
         RETURN f
         """,
         {"featureId": feature_id}
@@ -382,7 +502,9 @@ def create_feature(
     category: str = "functional",
     steps: Optional[list[str]] = None,
     priority: int = 0,
-    in_progress: bool = True
+    in_progress: bool = True,
+    branch_hint: Optional[str] = None,
+    file_patterns: Optional[list[str]] = None
 ) -> str:
     """Create a new feature and return its ID."""
     feature_id = str(uuid.uuid4())
@@ -411,6 +533,8 @@ def create_feature(
             status: $status,
             priority: $priority,
             steps: $steps,
+            branch_hint: $branchHint,
+            file_patterns: $filePatterns,
             created_at: datetime(),
             updated_at: datetime(),
             work_count: 0
@@ -425,9 +549,142 @@ def create_feature(
             "status": status,
             "priority": priority,
             "steps": steps or [],
+            "branchHint": branch_hint,
+            "filePatterns": file_patterns or [],
         }
     )
     return feature_id
+
+
+def reattribute_session_work_events(
+    project_dir: str,
+    feature_id: str,
+    lookback_minutes: int = 60
+) -> int:
+    """
+    Re-attribute recent Session Work events to a new feature (bidirectional linking).
+    Events remain linked to Session Work AND get linked to the new feature.
+
+    Args:
+        project_dir: Project directory path
+        feature_id: Feature to link events to
+        lookback_minutes: How many minutes back to look for events
+
+    Returns:
+        Number of events re-attributed
+    """
+    # Work tool names (excludes MCP meta tools)
+    work_tool_names = [
+        'Edit', 'Write', 'Read', 'Bash', 'Grep', 'Glob', 'Task',
+        'TodoWrite', 'TodoRead', 'WebSearch', 'WebFetch', 'NotebookEdit'
+    ]
+
+    # Find events linked to Session Work within the lookback window
+    # Memgraph uses ISO 8601 duration format: PT{minutes}M
+    duration_str = f"PT{lookback_minutes}M"
+    results = run_query(
+        """
+        MATCH (e:Event)-[:LINKED_TO]->(sw:Feature {is_session_work: true})-[:BELONGS_TO]->(p:Project {path: $projectPath})
+        WHERE e.timestamp > datetime() - duration($durationStr)
+        AND e.tool_name IN $workToolNames
+        RETURN e.id as eventId
+        """,
+        {"projectPath": project_dir, "durationStr": duration_str, "workToolNames": work_tool_names}
+    )
+
+    if not results:
+        return 0
+
+    # Create LINKED_TO relationships to the new feature (bidirectional - keeps Session Work link)
+    linked_count = 0
+    for r in results:
+        event_id = r.get("eventId")
+        if event_id:
+            run_write_query(
+                """
+                MATCH (e:Event {id: $eventId})
+                MATCH (f:Feature {id: $featureId})
+                MERGE (e)-[:LINKED_TO]->(f)
+                """,
+                {"eventId": event_id, "featureId": feature_id}
+            )
+            linked_count += 1
+
+    # Update work_count on the new feature
+    run_write_query(
+        """
+        MATCH (f:Feature {id: $featureId})
+        SET f.work_count = f.work_count + $linkedCount,
+            f.updated_at = datetime()
+        """,
+        {"featureId": feature_id, "linkedCount": linked_count}
+    )
+
+    return linked_count
+
+
+def discover_feature(
+    project_dir: str,
+    description: str,
+    category: str = "functional",
+    steps: Optional[list[str]] = None,
+    priority: int = 50,
+    lookback_minutes: int = 60,
+    mark_complete: bool = False,
+    agent: Optional[str] = None,
+    branch_hint: Optional[str] = None
+) -> dict:
+    """
+    Create a new feature on-demand and re-attribute recent Session Work activities.
+
+    This is the Python equivalent of the ijoka_discover_feature MCP tool.
+    Use when Claude realizes mid-session that work constitutes a distinct feature.
+
+    Args:
+        project_dir: Project directory path
+        description: Feature description
+        category: Feature category
+        steps: Implementation/verification steps
+        priority: Priority (higher = more important)
+        lookback_minutes: How many minutes back to look for activities
+        mark_complete: If True, mark feature as complete immediately
+        agent: Agent identifier
+        branch_hint: Git branch name associated with this feature
+
+    Returns:
+        Dict with feature, reattributed_events count, and message
+    """
+    # Step 1: Create the feature
+    feature_id = create_feature(
+        project_dir=project_dir,
+        description=description,
+        category=category,
+        steps=steps,
+        priority=priority,
+        in_progress=not mark_complete,  # Only start if not marking complete
+        branch_hint=branch_hint
+    )
+
+    # Step 2: If mark_complete, complete it
+    if mark_complete:
+        complete_feature(feature_id)
+
+    # Step 3: Re-attribute recent Session Work activities
+    reattributed = reattribute_session_work_events(
+        project_dir=project_dir,
+        feature_id=feature_id,
+        lookback_minutes=lookback_minutes
+    )
+
+    return {
+        "feature_id": feature_id,
+        "description": description,
+        "category": category,
+        "status": "complete" if mark_complete else "in_progress",
+        "reattributed_events": reattributed,
+        "lookback_minutes": lookback_minutes,
+        "message": f"Discovered feature: {description}. Re-attributed {reattributed} events from last {lookback_minutes} minutes."
+    }
 
 
 def find_similar_feature(project_dir: str, description: str) -> Optional[dict]:
@@ -454,6 +711,43 @@ def find_similar_feature(project_dir: str, description: str) -> Optional[dict]:
         # Substring match
         if desc_lower in existing_desc or existing_desc in desc_lower:
             return feature
+
+    return None
+
+
+def classify_by_file_path(project_dir: str, file_path: str) -> Optional[dict]:
+    """
+    Classify a file path by matching against feature file_patterns.
+    Uses fnmatch for glob pattern matching.
+
+    Args:
+        project_dir: Project directory path
+        file_path: File path to classify (relative to project)
+
+    Returns:
+        Dict with feature_id and confidence, or None if no match
+    """
+    import fnmatch
+
+    # Get all features with file_patterns
+    features = get_features(project_dir)
+    features_with_patterns = [
+        f for f in features
+        if f.get("file_patterns") and len(f.get("file_patterns", [])) > 0
+    ]
+
+    if not features_with_patterns:
+        return None
+
+    # Find best matching feature
+    for feature in features_with_patterns:
+        patterns = feature.get("file_patterns", [])
+        for pattern in patterns:
+            if fnmatch.fnmatch(file_path, pattern):
+                return {
+                    "feature_id": feature.get("id"),
+                    "confidence": 0.8
+                }
 
     return None
 

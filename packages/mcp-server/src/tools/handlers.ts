@@ -55,6 +55,9 @@ export async function handleToolCall(
     case 'ijoka_get_plan':
       result = await handleGetPlan(args);
       break;
+    case 'ijoka_discover_feature':
+      result = await handleDiscoverFeature(args);
+      break;
     default:
       result = {
         success: false,
@@ -128,30 +131,53 @@ async function handleStatus(args: Record<string, unknown>): Promise<ToolResult> 
 async function handleStartFeature(args: Record<string, unknown>): Promise<ToolResult> {
   const projectPath = getProjectPath();
   const featureId = args.feature_id as string | undefined;
-  const agent = (args.agent as string) || 'claude-code';
+  const agent = (args.agent as string) || (args.source_agent as string) || 'claude-code';
+  const sessionId = (args.session_id as string) || process.env.CLAUDE_SESSION_ID || `session-${Date.now()}`;
 
-  let feature: db.Feature | null;
+  let targetFeatureId = featureId;
 
-  if (featureId) {
-    // Start specific feature
-    feature = await db.startFeature(featureId, agent);
-  } else {
-    // Get next available feature
-    feature = await db.getNextFeature(projectPath);
-    if (!feature) {
+  // If no feature_id, get next available feature
+  if (!targetFeatureId) {
+    const nextFeature = await db.getNextFeature(projectPath);
+    if (!nextFeature) {
       return {
         success: false,
         error: 'No pending features available to start',
       };
     }
-    if (!feature.id) {
+    if (!nextFeature.id) {
       return {
         success: false,
         error: 'Next feature found but has no ID - database may be corrupted',
       };
     }
-    feature = await db.startFeature(feature.id, agent);
+    targetFeatureId = nextFeature.id;
   }
+
+  // Check for existing claim before attempting to start
+  const existingClaim = await db.getFeatureClaim(targetFeatureId);
+  if (existingClaim && existingClaim.sessionId !== sessionId) {
+    const isClaimActive = await db.isSessionActive(existingClaim.sessionId);
+    if (isClaimActive) {
+      return {
+        success: false,
+        error: `Feature is claimed by another active session`,
+        conflict: {
+          claimed_by: existingClaim.agent,
+          session_id: existingClaim.sessionId,
+          claimed_at: existingClaim.claimedAt,
+          is_stale: false,
+        },
+      };
+    }
+    // Stale claim - will be overridden
+  }
+
+  // Start the feature with session info
+  const feature = await db.startFeature(targetFeatureId, {
+    agent,
+    sessionId,
+  });
 
   if (!feature) {
     return {
@@ -163,6 +189,7 @@ async function handleStartFeature(args: Record<string, unknown>): Promise<ToolRe
   return {
     success: true,
     feature,
+    session_id: sessionId,
     message: `Started feature: ${feature.description}`,
   };
 }
@@ -286,6 +313,8 @@ async function handleCreateFeature(args: Record<string, unknown>): Promise<ToolR
   const category = args.category as string;
   const steps = args.steps as string[] | undefined;
   const priority = args.priority as number | undefined;
+  const branchHint = args.branch_hint as string | undefined;
+  const filePatterns = args.file_patterns as string[] | undefined;
 
   if (!description || !category) {
     return {
@@ -302,6 +331,8 @@ async function handleCreateFeature(args: Record<string, unknown>): Promise<ToolR
     category,
     steps,
     priority,
+    branch_hint: branchHint,
+    file_patterns: filePatterns,
   });
 
   return {
@@ -462,5 +493,60 @@ async function handleGetPlan(args: Record<string, unknown>): Promise<ToolResult>
       total: steps.length,
       percentage: steps.length > 0 ? Math.round((completed / steps.length) * 100) : 0,
     },
+  };
+}
+
+async function handleDiscoverFeature(args: Record<string, unknown>): Promise<ToolResult> {
+  const projectPath = getProjectPath(args.project_path as string | undefined);
+  const description = args.description as string;
+  const category = args.category as string;
+  const steps = args.steps as string[] | undefined;
+  const priority = (args.priority as number) || 50;
+  const lookbackMinutes = (args.lookback_minutes as number) || 60;
+  const markComplete = args.mark_complete === true;
+  const agent = (args.source_agent as string) || 'claude-code';
+
+  if (!description || !category) {
+    return {
+      success: false,
+      error: 'Description and category are required',
+    };
+  }
+
+  // Ensure project exists
+  await db.upsertProject({ path: projectPath });
+
+  // Step 1: Create the feature
+  const feature = await db.createFeature(projectPath, {
+    description,
+    category,
+    steps,
+    priority,
+  });
+
+  // Step 2: Set as active (or complete if mark_complete is true)
+  let finalFeature: db.Feature | null;
+  if (markComplete) {
+    finalFeature = await db.completeFeature(feature.id);
+  } else {
+    finalFeature = await db.startFeature(feature.id, agent);
+  }
+
+  // Step 3: Re-attribute recent Session Work activities to this feature
+  const reattributedCount = await db.reattributeSessionWorkEvents(
+    projectPath,
+    feature.id,
+    lookbackMinutes
+  );
+
+  const stats = await db.getProjectStats(projectPath);
+
+  return {
+    success: true,
+    feature: finalFeature || feature,
+    reattributed_events: reattributedCount,
+    lookback_minutes: lookbackMinutes,
+    stats,
+    message: `Discovered feature: ${description}. Re-attributed ${reattributedCount} events from last ${lookbackMinutes} minutes.`,
   };
 }

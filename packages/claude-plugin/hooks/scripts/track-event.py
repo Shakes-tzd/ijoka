@@ -19,9 +19,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-# Import shared database helper
+# Import shared helpers
 sys.path.insert(0, str(Path(__file__).parent))
 import graph_db_helper as db_helper
+from git_utils import resolve_project_path
 
 # Background shell cache for linking BashOutput to original commands
 SHELL_CACHE_FILE = Path.home() / ".ijoka" / "background_shells.json"
@@ -408,7 +409,9 @@ def generate_workflow_nudges(
     tool_result: dict,
     project_dir: str,
     session_id: str,
-    active_feature: dict | None
+    active_feature: dict | None,
+    payload: dict | None = None,
+    active_step: dict | None = None
 ) -> list[str]:
     """
     Generate workflow nudges based on current work patterns.
@@ -442,6 +445,21 @@ def generate_workflow_nudges(
                 desc = active_feature.get("description", "")[:30]
                 nudges.append(f"✅ Tests/build passed! If '{desc}...' is complete, use `ijoka_complete_feature`.")
                 db_helper.record_nudge(session_id, "feature_completion")
+
+    # 3. Drift warning (when drift score >= 0.7)
+    if payload and active_step:
+        drift_score = payload.get("driftScore", 0.0)
+        drift_reason = payload.get("driftReason", "")
+
+        if drift_score >= 0.7:
+            step_id = active_step.get("id", "unknown")
+            nudge_key = f"drift_warning_{step_id}"
+
+            if not db_helper.has_been_nudged(session_id, nudge_key):
+                warning = generate_drift_warning(active_step, drift_score, drift_reason)
+                if warning:
+                    nudges.append(warning)
+                    db_helper.record_nudge(session_id, nudge_key)
 
     return nudges
 
@@ -755,7 +773,8 @@ def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) ->
     # Generate workflow nudges
     nudges = generate_workflow_nudges(
         tool_name, tool_input, tool_result,
-        project_dir, session_id, active_feature
+        project_dir, session_id, active_feature,
+        payload=payload, active_step=active_step
     )
     return nudges
 
@@ -987,23 +1006,16 @@ def main():
             f.write(f"is_mcp_meta_tool: {is_mcp_meta_tool(tool_name)}\n")
 
     session_id = hook_input.get("session_id") or os.environ.get("CLAUDE_SESSION_ID", "unknown")
-    # Claude Code provides 'cwd' in hook_input; fall back to env var or detection
-    project_dir = hook_input.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR", "")
 
-    if not project_dir:
-        # Try to detect project from file path by looking for common project markers
-        tool_input = hook_input.get("tool_input", {})
-        file_path = tool_input.get("file_path", "")
-        if file_path:
-            path = Path(file_path)
-            for parent in [path] + list(path.parents):
-                # Check for common project markers (git, package.json, Cargo.toml, etc.)
-                if any((parent / marker).exists() for marker in [".git", "package.json", "Cargo.toml", "pyproject.toml", "CLAUDE.md"]):
-                    project_dir = str(parent)
-                    break
-
-    if not project_dir:
-        project_dir = os.getcwd()
+    # Resolve project path using git-aware resolution
+    # In Ijoka, PROJECT = GIT REPOSITORY - all subdirectories belong to the same project
+    tool_input = hook_input.get("tool_input", {})
+    file_path = tool_input.get("file_path", "")
+    project_dir = resolve_project_path(
+        cwd=hook_input.get("cwd"),
+        file_path=file_path,
+        env_var=os.environ.get("CLAUDE_PROJECT_DIR")
+    )
 
     # Route to appropriate handler and collect nudges
     nudges = []

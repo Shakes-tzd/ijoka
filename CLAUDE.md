@@ -129,6 +129,24 @@ uv run packages/claude-plugin/hooks/scripts/graph_validator.py --fix
 
 ## Code Style
 
+### Python (CRITICAL)
+
+**See `packages/claude-plugin/hooks/scripts/PYTHON_STANDARDS.md` for full details.**
+
+Key rules:
+- **ALWAYS use `uv run` to execute Python scripts** - never `python3` directly
+- Scripts with dependencies MUST have uv shebang: `#!/usr/bin/env -S uv run --script`
+- Git utilities are in `git_utils.py` (no deps) - import directly from there
+- Database operations are in `graph_db_helper.py` (needs neo4j via uv)
+
+```bash
+# ✅ CORRECT
+uv run script.py
+
+# ❌ WRONG - will fail with missing dependencies
+python3 script.py
+```
+
 ### Rust
 - Use `tracing` for logging
 - Handle errors with `Result` types

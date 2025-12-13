@@ -241,6 +241,15 @@ These insights can be surfaced to future sessions working on similar tasks.`,
           type: 'integer',
           description: 'Priority (higher = more important)',
         },
+        branch_hint: {
+          type: 'string',
+          description: 'Git branch name associated with this feature (e.g., "feature/auth")',
+        },
+        file_patterns: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'File path patterns for automatic classification (glob patterns, e.g., "src/auth/**", "tests/auth/**")',
+        },
         source_agent: {
           type: 'string',
           description: 'Agent identifier (e.g., claude-code, gemini-cli, codex-cli). Required for non-Claude tools.',
@@ -342,6 +351,77 @@ These insights can be surfaced to future sessions working on similar tasks.`,
         },
       },
       required: [],
+    },
+  },
+
+  // ==========================================================================
+  // TIER 5: On-Demand Feature Discovery (~400 tokens)
+  // ==========================================================================
+  {
+    name: 'ijoka_discover_feature',
+    description: `Create a new feature on-demand when you realize current work constitutes a distinct feature.
+Use this when you identify that work you're doing (or just did) should be tracked as its own feature.
+This tool:
+1. Creates the feature
+2. Sets it as active immediately
+3. Re-attributes recent Session Work activities to the new feature (bidirectional linking)
+
+WHEN TO USE:
+- You realize mid-session that current work is a distinct feature
+- User describes a new feature request during conversation
+- You identify that recent work should be properly attributed
+
+The feature will be linked to recent activities from the last N minutes (default: 60).`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        description: {
+          type: 'string',
+          description: 'Feature description',
+        },
+        category: {
+          type: 'string',
+          enum: [
+            'functional',
+            'ui',
+            'security',
+            'performance',
+            'documentation',
+            'testing',
+            'infrastructure',
+            'refactoring',
+            'planning',
+            'meta',
+          ],
+          description: 'Feature category',
+        },
+        steps: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Implementation/verification steps (optional)',
+        },
+        priority: {
+          type: 'integer',
+          description: 'Priority (higher = more important, default: 50)',
+        },
+        lookback_minutes: {
+          type: 'integer',
+          description: 'How many minutes back to look for activities to re-attribute (default: 60)',
+        },
+        mark_complete: {
+          type: 'boolean',
+          description: 'If true, mark the feature as complete immediately (for retroactive attribution of finished work)',
+        },
+        source_agent: {
+          type: 'string',
+          description: 'Agent identifier (e.g., claude-code, gemini-cli, codex-cli). Required for non-Claude tools.',
+        },
+        session_id: {
+          type: 'string',
+          description: 'Unique session identifier from the calling agent',
+        },
+      },
+      required: ['description', 'category'],
     },
   },
 ];

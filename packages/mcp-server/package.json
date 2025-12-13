@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "minimatch": "^10.0.1",
     "neo4j-driver": "^5.27.0",
     "zod": "^3.23.8"
   },

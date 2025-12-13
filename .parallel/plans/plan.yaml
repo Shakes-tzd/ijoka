@@ -1,0 +1,124 @@
+metadata:
+  name: Tier 1 Claude Code Observability
+  created: 20251211-143000
+  status: ready
+overview: "Upgrade Ijoka's Claude Code integration from activity logging to semantic\
+  \ \nobservability. Capture plans via TodoWrite, track step progression, detect \n\
+  drift/stuckness, and inject feedback via hooks.\n"
+research:
+  approach: Plan-aware monitoring with behavioral drift detection
+  libraries:
+  - name: neo4j (existing)
+    reason: Already using Memgraph with Neo4j driver
+  patterns:
+  - file: packages/claude-plugin/hooks/scripts/track-event.py:302-469
+    description: PostToolUse handler pattern with feature linking
+  - file: packages/claude-plugin/hooks/scripts/graph_db_helper.py:549-623
+    description: Event insertion with deduplication
+  - file: packages/mcp-server/src/tools/handlers.ts:56-67
+    description: MCP activity recording pattern
+  specifications:
+  - requirement: 'Stuckness: No progress for 3-5 min + repeated patterns'
+    status: must_follow
+  - requirement: 'Drift: Actions unrelated to active step'
+    status: must_follow
+  - requirement: Feedback via additionalContext in hook response
+    status: must_follow
+  dependencies:
+    existing:
+    - neo4j>=5.0 (Python)
+    - Memgraph (Docker)
+    new: []
+features:
+- plan-capture
+- step-tracking
+- drift-detection
+- stuckness-detection
+- feedback-injection
+tasks:
+- id: task-0
+  name: Graph Schema Migration - Add Step Nodes
+  file: tasks/task-0.md
+  priority: blocker
+  dependencies: []
+- id: task-1
+  name: TodoWrite Hook - Capture Plans as Steps
+  file: tasks/task-1.md
+  priority: blocker
+  dependencies:
+  - task-0
+- id: task-2
+  name: "Step\u2194Event Linking in PostToolUse"
+  file: tasks/task-2.md
+  priority: high
+  dependencies:
+  - task-0
+  - task-1
+- id: task-3
+  name: Drift Detection Algorithm
+  file: tasks/task-3.md
+  priority: high
+  dependencies:
+  - task-2
+- id: task-4
+  name: Stuckness Detection Algorithm
+  file: tasks/task-4.md
+  priority: high
+  dependencies:
+  - task-2
+- id: task-5
+  name: Feedback Injection via additionalContext
+  file: tasks/task-5.md
+  priority: high
+  dependencies:
+  - task-3
+  - task-4
+- id: task-6
+  name: MCP Tools for Plan Management
+  file: tasks/task-6.md
+  priority: medium
+  dependencies:
+  - task-0
+  - task-1
+shared_resources:
+  files:
+  - path: packages/claude-plugin/hooks/scripts/graph_db_helper.py
+    reason: Multiple tasks add functions
+    mitigation: Task 0 adds schema first, others add functions sequentially
+  - path: packages/claude-plugin/hooks/scripts/track-event.py
+    reason: Tasks 2-5 modify PostToolUse handler
+    mitigation: Sequential execution with clear function boundaries
+  - path: packages/claude-plugin/hooks/hooks.json
+    reason: Task 1 adds TodoWrite matcher
+    mitigation: Single task modifies
+  databases:
+  - name: Memgraph
+    concern: Schema changes during development
+    mitigation: Use MERGE for idempotent operations
+testing:
+  unit:
+  - Test plan capture from TodoWrite payload
+  - Test step linking logic
+  - Test drift score calculation
+  - Test stuckness detection conditions
+  integration:
+  - "End-to-end: TodoWrite \u2192 Plan \u2192 Step \u2192 Event \u2192 Feedback"
+  - Verify feedback appears in Claude responses
+  isolation:
+  - Each task tests independently
+  - Mock Memgraph for unit tests
+success_criteria:
+- TodoWrite captured as Plan with Step nodes
+- Tool calls linked to active Step
+- Drift detected when actions diverge from plan
+- Stuckness detected after 3-5 min no progress
+- Feedback injected via additionalContext
+- All existing functionality preserved
+notes: "Key insight: Features already serve as the \"Plan\" concept. We're adding\n\
+  Step nodes to make the steps[] array trackable with status and temporal data.\n\n\
+  TodoWrite is currently filtered out as a meta-tool. We'll capture it \nspecifically\
+  \ to extract the agent's plan structure.\n\nDrift detection uses semantic similarity\
+  \ between step description and \ntool call context (file paths, tool type, etc).\n"
+changelog:
+- timestamp: 20251211-143000
+  event: Plan created from research synthesis
