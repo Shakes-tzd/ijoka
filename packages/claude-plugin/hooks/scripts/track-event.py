@@ -517,18 +517,28 @@ def generate_workflow_nudges(
                 db_helper.record_nudge(session_id, "feature_completion")
 
     # 3. Drift warning (when drift score >= 0.7)
-    if payload and active_step:
+    if payload:
         drift_score = payload.get("driftScore", 0.0)
         drift_reason = payload.get("driftReason", "")
 
         if drift_score >= 0.7:
-            step_id = active_step.get("id", "unknown")
-            nudge_key = f"drift_warning_{step_id}"
-
-            if not db_helper.has_been_nudged(session_id, nudge_key):
-                warning = generate_drift_warning(active_step, drift_score, drift_reason)
-                if warning:
-                    nudges.append(warning)
+            if active_step:
+                # Step-level drift warning
+                nudge_key = f"drift_warning_{active_step.get('id', 'unknown')}"
+                if not db_helper.has_been_nudged(session_id, nudge_key):
+                    warning = generate_drift_warning(active_step, drift_score, drift_reason)
+                    if warning:
+                        nudges.append(warning)
+                        db_helper.record_nudge(session_id, nudge_key)
+            elif active_feature and not active_feature.get("is_session_work"):
+                # Feature-level alignment warning (no steps)
+                nudge_key = f"drift_warning_feature_{active_feature.get('id', 'unknown')}"
+                if not db_helper.has_been_nudged(session_id, nudge_key):
+                    feature_desc = active_feature.get("description", "current feature")[:50]
+                    nudges.append(
+                        f"⚠️ Low alignment ({drift_reason}): Current activity may not relate to '{feature_desc}...'. "
+                        "Consider checking if you're working on the right feature."
+                    )
                     db_helper.record_nudge(session_id, nudge_key)
 
     # 4. Session Work accumulator alert (when >20 events unattributed to real features)
@@ -818,9 +828,16 @@ def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) ->
     # Calculate drift score
     drift_score = 0.0
     drift_reason = ""
-    if active_step and not is_diagnostic:
-        drift_score, drift_reason = calculate_drift(active_step, tool_name, tool_input, payload)
-        payload["driftScore"] = drift_score
+    if not is_diagnostic:
+        if active_step:
+            # Step-level drift detection (precise)
+            drift_score, drift_reason = calculate_drift(active_step, tool_name, tool_input, payload)
+        elif active_feature and not active_feature.get("is_session_work"):
+            # Feature-level alignment fallback (when no Steps exist)
+            drift_score, drift_reason = calculate_feature_alignment(active_feature, tool_name, tool_input)
+
+        if drift_score > 0:
+            payload["driftScore"] = drift_score
         if drift_score > 0.3:
             payload["driftReason"] = drift_reason
 
