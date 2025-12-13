@@ -497,7 +497,8 @@ def create_feature(
     priority: int = 0,
     in_progress: bool = True,
     branch_hint: Optional[str] = None,
-    file_patterns: Optional[list[str]] = None
+    file_patterns: Optional[list[str]] = None,
+    work_item_type: str = "feature"
 ) -> str:
     """Create a new feature and return its ID."""
     feature_id = str(uuid.uuid4())
@@ -514,6 +515,7 @@ def create_feature(
             id: $id,
             description: $description,
             category: $category,
+            type: $type,
             status: $status,
             priority: $priority,
             steps: $steps,
@@ -530,6 +532,7 @@ def create_feature(
             "id": feature_id,
             "description": description,
             "category": category,
+            "type": work_item_type,
             "status": status,
             "priority": priority,
             "steps": steps or [],
@@ -616,7 +619,8 @@ def discover_feature(
     lookback_minutes: int = 60,
     mark_complete: bool = False,
     agent: Optional[str] = None,
-    branch_hint: Optional[str] = None
+    branch_hint: Optional[str] = None,
+    work_item_type: str = "feature"
 ) -> dict:
     """
     Create a new feature on-demand and re-attribute recent Session Work activities.
@@ -646,7 +650,8 @@ def discover_feature(
         steps=steps,
         priority=priority,
         in_progress=not mark_complete,  # Only start if not marking complete
-        branch_hint=branch_hint
+        branch_hint=branch_hint,
+        work_item_type=work_item_type
     )
 
     # Step 2: If mark_complete, complete it

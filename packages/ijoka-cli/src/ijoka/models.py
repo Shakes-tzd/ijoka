@@ -34,6 +34,16 @@ class FeatureCategory(str, Enum):
     ENHANCEMENT = "enhancement"
 
 
+class WorkItemType(str, Enum):
+    """Work item types for feature classification."""
+    FEATURE = "feature"      # New functionality
+    BUG = "bug"              # Something broken that needs fixing
+    SPIKE = "spike"          # Research/investigation task
+    CHORE = "chore"          # Maintenance/cleanup work
+    HOTFIX = "hotfix"        # Urgent production fix
+    EPIC = "epic"            # Large initiative spanning multiple features
+
+
 class InsightType(str, Enum):
     """Types of insights that can be recorded."""
     SOLUTION = "solution"
@@ -77,6 +87,7 @@ class Feature(BaseModel):
     id: str
     description: str
     category: FeatureCategory
+    type: WorkItemType = WorkItemType.FEATURE
     status: FeatureStatus = FeatureStatus.PENDING
     priority: int = Field(default=50, ge=-100, le=100)
     steps: list[str] = Field(default_factory=list)
@@ -106,6 +117,7 @@ class FeatureListItem(BaseModel):
     id: str
     description: str
     category: FeatureCategory
+    type: WorkItemType = WorkItemType.FEATURE
     status: FeatureStatus
     priority: int
     work_count: int = 0

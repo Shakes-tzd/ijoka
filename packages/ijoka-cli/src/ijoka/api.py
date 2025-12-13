@@ -38,6 +38,7 @@ from .models import (
     ProjectStats,
     Step,
     VelocityResponse,
+    WorkItemType,
 )
 from .query_engine import AgenticQueryEngine
 
@@ -51,6 +52,7 @@ class CreateFeatureRequest(BaseModel):
     """Request to create a new feature."""
     description: str = Field(..., min_length=1, description="Feature description")
     category: FeatureCategory = Field(..., description="Feature category")
+    type: WorkItemType = Field(default=WorkItemType.FEATURE, description="Work item type")
     priority: int = Field(default=50, ge=-100, le=100, description="Priority (higher = more important)")
     steps: Optional[list[str]] = Field(default=None, description="Implementation steps")
     branch_hint: Optional[str] = Field(default=None, description="Git branch hint")
@@ -141,6 +143,7 @@ class DiscoverFeatureRequest(BaseModel):
     """Request to discover and create feature from recent activity."""
     description: str = Field(..., min_length=1)
     category: FeatureCategory
+    type: WorkItemType = Field(default=WorkItemType.FEATURE, description="Work item type")
     priority: int = Field(default=50, ge=-100, le=100)
     steps: Optional[list[str]] = None
     lookback_minutes: int = Field(default=60, ge=1)
@@ -277,11 +280,12 @@ async def create_feature(request: CreateFeatureRequest):
         steps=request.steps,
         branch_hint=request.branch_hint,
         file_patterns=request.file_patterns,
+        work_item_type=request.type.value,
     )
 
     return FeatureResponse(
         feature=feature,
-        message=f"Created feature: {feature.description}",
+        message=f"Created {request.type.value}: {feature.description}",
     )
 
 
@@ -613,14 +617,16 @@ async def discover_feature(request: DiscoverFeatureRequest):
                 detail="discover_feature not yet implemented in database client"
             )
 
-        feature = client.discover_feature(
+        result = client.discover_feature(
             description=request.description,
             category=request.category.value,
             priority=request.priority,
             steps=request.steps,
             lookback_minutes=request.lookback_minutes,
             mark_complete=request.mark_complete,
+            work_item_type=request.type.value,
         )
+        feature = result["feature"]
 
         message = f"Discovered and created feature: {feature.description}"
         if request.mark_complete:

@@ -27,6 +27,7 @@ from .models import (
     Session,
     Step,
     StepStatus,
+    WorkItemType,
 )
 
 
@@ -195,6 +196,7 @@ class IjokaClient:
                     id=node["id"],
                     description=node["description"],
                     category=FeatureCategory(node["category"]),
+                    type=WorkItemType(node.get("type", "feature")),
                     status=FeatureStatus(node["status"]),
                     priority=int(node.get("priority", 0)),
                     work_count=int(node.get("work_count", 0)),
@@ -265,6 +267,7 @@ class IjokaClient:
         steps: Optional[list[str]] = None,
         branch_hint: Optional[str] = None,
         file_patterns: Optional[list[str]] = None,
+        work_item_type: str = "feature",
     ) -> Feature:
         """Create a new feature."""
         self.ensure_project()
@@ -278,6 +281,7 @@ class IjokaClient:
                     id: $id,
                     description: $description,
                     category: $category,
+                    type: $type,
                     status: 'pending',
                     priority: $priority,
                     steps: $steps,
@@ -293,6 +297,7 @@ class IjokaClient:
                 id=feature_id,
                 description=description,
                 category=category,
+                type=work_item_type,
                 priority=priority,
                 steps=steps or [],
                 branch_hint=branch_hint,
@@ -926,6 +931,7 @@ class IjokaClient:
         steps: Optional[list[str]] = None,
         lookback_minutes: int = 60,
         mark_complete: bool = False,
+        work_item_type: str = "feature",
     ) -> dict:
         """
         Create and activate a feature (optionally marking complete immediately).
@@ -947,6 +953,7 @@ class IjokaClient:
             category=category,
             priority=priority,
             steps=steps or [],
+            work_item_type=work_item_type,
         )
 
         # Create plan steps if provided
@@ -979,6 +986,7 @@ class IjokaClient:
             id=node["id"],
             description=node["description"],
             category=FeatureCategory(node["category"]),
+            type=WorkItemType(node.get("type", "feature")),
             status=FeatureStatus(node["status"]),
             priority=int(node.get("priority", 0)),
             steps=list(node.get("steps", [])),

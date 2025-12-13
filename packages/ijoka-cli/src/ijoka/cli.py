@@ -27,6 +27,7 @@ from .models import (
     InsightType,
     PlanResponse,
     ProjectStats,
+    WorkItemType,
 )
 from .analytics import PatternDetector, TemporalAnalyzer, AgentProfiler, InsightSynthesizer, SelfImprovementLoop
 from .query_engine import AgenticQueryEngine
@@ -204,6 +205,7 @@ def feature_list(
         console.print()
         table = Table(title=f"Features ({len(features)})")
         table.add_column("Status", width=3)
+        table.add_column("Type", width=8)
         table.add_column("Pri", justify="right", width=4)
         table.add_column("Category", width=14)
         table.add_column("Description")
@@ -215,13 +217,25 @@ def feature_list(
             FeatureStatus.BLOCKED: "[red]✗[/red]",
         }
 
+        type_styles = {
+            "feature": "",
+            "bug": "[red]",
+            "spike": "[yellow]",
+            "chore": "[dim]",
+            "hotfix": "[bold red]",
+            "epic": "[bold cyan]",
+        }
+
         for f in features:
             icon = status_icons.get(f.status, "?")
+            type_style = type_styles.get(f.type.value, "")
+            type_end = "[/]" if type_style else ""
             table.add_row(
                 icon,
+                f"{type_style}{f.type.value}{type_end}",
                 str(f.priority),
                 f.category.value,
-                f.description[:60] + ("..." if len(f.description) > 60 else ""),
+                f.description[:55] + ("..." if len(f.description) > 55 else ""),
             )
 
         console.print(table)
@@ -278,6 +292,7 @@ def feature_create(
     category: Annotated[str, typer.Argument(help="Category (functional, ui, infrastructure, etc.)")],
     description: Annotated[str, typer.Argument(help="Feature description")],
     priority: Annotated[int, typer.Option("--priority", "-p", help="Priority (higher = more important)")] = 50,
+    work_type: Annotated[str, typer.Option("--type", "-t", help="Work item type (feature, bug, spike, chore, hotfix, epic)")] = "feature",
     json_output: Annotated[bool, typer.Option("--json", "-j", help="Output as JSON")] = False,
 ):
     """Create a new feature."""
@@ -290,6 +305,15 @@ def feature_create(
         console.print(f"[dim]Valid categories: {valid}[/dim]")
         raise typer.Exit(1)
 
+    # Validate work item type
+    try:
+        WorkItemType(work_type)
+    except ValueError:
+        valid = ", ".join(t.value for t in WorkItemType)
+        console.print(f"[red]Invalid type: {work_type}[/red]")
+        console.print(f"[dim]Valid types: {valid}[/dim]")
+        raise typer.Exit(1)
+
     client = get_client_safe()
 
     try:
@@ -297,13 +321,14 @@ def feature_create(
             description=description,
             category=category,
             priority=priority,
+            work_item_type=work_type,
         )
 
         if json_output:
             output_json({"success": True, "feature": feature.model_dump()})
             return
 
-        console.print(f"[green]✓ Created feature:[/green] {feature.description}")
+        console.print(f"[green]✓ Created {work_type}:[/green] {feature.description}")
         console.print(f"[dim]ID: {feature.id}[/dim]")
 
     finally:
@@ -453,6 +478,7 @@ def feature_update(
 def feature_discover(
     description: Annotated[str, typer.Argument(help="Feature description")],
     category: Annotated[str, typer.Option("--category", "-c", help="Feature category")] = ...,
+    work_type: Annotated[str, typer.Option("--type", "-t", help="Work item type (feature, bug, spike, chore, hotfix, epic)")] = "feature",
     priority: Annotated[int, typer.Option("--priority", "-p", help="Priority (higher = more important)")] = 50,
     steps: Annotated[Optional[list[str]], typer.Option("--step", help="Step description (can be repeated)")] = None,
     lookback_minutes: Annotated[int, typer.Option("--lookback-minutes", help="How far back to look for events")] = 60,
@@ -473,6 +499,15 @@ def feature_discover(
         console.print(f"[dim]Valid categories: {valid}[/dim]")
         raise typer.Exit(1)
 
+    # Validate work item type
+    try:
+        WorkItemType(work_type)
+    except ValueError:
+        valid = ", ".join(t.value for t in WorkItemType)
+        console.print(f"[red]Invalid type: {work_type}[/red]")
+        console.print(f"[dim]Valid types: {valid}[/dim]")
+        raise typer.Exit(1)
+
     client = get_client_safe()
 
     try:
@@ -483,6 +518,7 @@ def feature_discover(
             steps=steps,
             lookback_minutes=lookback_minutes,
             mark_complete=mark_complete,
+            work_item_type=work_type,
         )
 
         if json_output:
