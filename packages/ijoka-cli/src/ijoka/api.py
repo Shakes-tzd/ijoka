@@ -453,26 +453,14 @@ async def get_plan_for_feature(feature_id: str):
                 detail="get_plan not yet implemented in database client"
             )
 
-        steps = client.get_plan(feature_id=feature_id)
+        plan_data = client.get_plan(feature_id=feature_id)
 
-        # Calculate progress
-        total = len(steps)
-        completed = sum(1 for s in steps if s.get('status') == 'completed')
-        progress = {
-            'total': total,
-            'completed': completed,
-            'remaining': total - completed,
-            'percentage': int((completed / total * 100)) if total > 0 else 0,
-        }
-
-        # Find active step
-        active_step = next((s for s in steps if s.get('status') == 'in_progress'), None)
-
+        # get_plan returns dict with steps, active_step, progress
         return PlanResponse(
             feature_id=feature_id,
-            steps=steps,
-            active_step=active_step,
-            progress=progress,
+            steps=[s.model_dump() for s in plan_data["steps"]],
+            active_step=plan_data["active_step"].model_dump() if plan_data["active_step"] else None,
+            progress=plan_data["progress"],
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -540,26 +528,14 @@ async def get_plan_for_active():
                 detail="get_plan not yet implemented in database client"
             )
 
-        steps = client.get_plan(feature_id=feature.id)
+        plan_data = client.get_plan(feature_id=feature.id)
 
-        # Calculate progress
-        total = len(steps)
-        completed = sum(1 for s in steps if s.get('status') == 'completed')
-        progress = {
-            'total': total,
-            'completed': completed,
-            'remaining': total - completed,
-            'percentage': int((completed / total * 100)) if total > 0 else 0,
-        }
-
-        # Find active step
-        active_step = next((s for s in steps if s.get('status') == 'in_progress'), None)
-
+        # get_plan returns dict with steps, active_step, progress
         return PlanResponse(
             feature_id=feature.id,
-            steps=steps,
-            active_step=active_step,
-            progress=progress,
+            steps=[s.model_dump() for s in plan_data["steps"]],
+            active_step=plan_data["active_step"].model_dump() if plan_data["active_step"] else None,
+            progress=plan_data["progress"],
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
