@@ -372,6 +372,76 @@ def _activate_next_feature(project_dir: str) -> str | None:
     return None
 
 
+def extract_activity_keywords(tool_name: str, tool_input: dict) -> set[str]:
+    """
+    Extract keywords from tool activity (files, commands, patterns).
+    Used to compare against feature description keywords.
+    """
+    activity_text = ""
+
+    # Extract text based on tool type
+    if tool_name == "Read":
+        activity_text = tool_input.get("file_path", "")
+    elif tool_name == "Write":
+        activity_text = tool_input.get("file_path", "")
+    elif tool_name == "Edit":
+        activity_text = tool_input.get("file_path", "")
+    elif tool_name == "Bash":
+        activity_text = tool_input.get("command", "")
+    elif tool_name == "Glob":
+        activity_text = tool_input.get("pattern", "")
+    elif tool_name == "Grep":
+        activity_text = tool_input.get("pattern", "") + " " + tool_input.get("path", "")
+    elif tool_name == "Task":
+        activity_text = tool_input.get("description", "")
+    elif tool_name.startswith("mcp__ijoka__"):
+        # MCP ijoka tools - extract description if present
+        activity_text = tool_input.get("description", "")
+
+    # Extract keywords from the combined activity text
+    return extract_keywords(activity_text)
+
+
+def calculate_feature_alignment(feature: dict, tool_name: str, tool_input: dict) -> tuple[float, str]:
+    """
+    Calculate alignment score between current activity and active feature.
+    Works WITHOUT Steps, using feature description keywords to score alignment.
+    Returns (score, reason) where score is 0.0 (perfectly aligned) to 1.0 (misaligned).
+
+    This is a fallback mechanism when get_active_step() returns None.
+    """
+    # Can't judge drift without a feature or for Session Work features
+    if not feature or feature.get("is_session_work"):
+        return 1.0, "no_feature"
+
+    # Extract keywords from feature description
+    feature_keywords = extract_keywords(feature.get("description", ""))
+
+    if not feature_keywords:
+        # No keywords to judge by - assume aligned
+        return 1.0, "no_keywords"
+
+    # Extract keywords from current activity
+    activity_keywords = extract_activity_keywords(tool_name, tool_input)
+
+    if not activity_keywords:
+        # No activity keywords - can't judge alignment
+        return 1.0, "no_activity_keywords"
+
+    # Calculate overlap
+    overlap = len(feature_keywords & activity_keywords)
+    total = len(feature_keywords)
+    overlap_ratio = overlap / total if total > 0 else 0
+
+    # Score based on overlap ratio (0.3 threshold = 30% of feature keywords should appear in activity)
+    if overlap_ratio >= 0.3:
+        return 0.0, "aligned"
+    elif overlap_ratio >= 0.1:
+        return 0.7, f"weak_alignment ({overlap}/{total})"
+    else:
+        return 0.4, f"low_alignment ({overlap}/{total})"
+
+
 def is_mcp_meta_tool(tool_name: str) -> bool:
     """Check if a tool call is an MCP ijoka meta tool (feature/project management)."""
     # MCP tools follow the pattern: mcp__<server>__<tool_name>
