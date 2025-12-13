@@ -3,9 +3,22 @@
  *
  * Defines the schema for all Ijoka tools.
  * These definitions are sent to the client on ListTools request.
+ *
+ * IMPORTANT: These MCP tools are the ONLY interface for Ijoka operations.
+ * Never bypass MCP by calling Python scripts or database queries directly.
  */
 
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+
+/**
+ * Enforcement notice included in primary tool description.
+ * This ensures agents see the MCP-first mandate on every status check.
+ */
+const MCP_ENFORCEMENT = `
+
+IMPORTANT: Always use ijoka_* MCP tools for ALL Ijoka operations.
+Never bypass MCP by calling Python scripts, database queries, or internal APIs directly.
+MCP tools provide validation, audit trails, and work across all AI clients (Claude, Cursor, Windsurf, etc).`;
 
 export const toolDefinitions: Tool[] = [
   // ==========================================================================
@@ -13,9 +26,9 @@ export const toolDefinitions: Tool[] = [
   // ==========================================================================
   {
     name: 'ijoka_status',
-    description: `Get current project status, active task, and context.
+    description: `Get current project status, active features, and context.
 This is the primary read interface - returns comprehensive state in one call.
-Use this to understand what you're working on and project progress.`,
+Use this to understand what you're working on and project progress.${MCP_ENFORCEMENT}`,
     inputSchema: {
       type: 'object',
       properties: {
