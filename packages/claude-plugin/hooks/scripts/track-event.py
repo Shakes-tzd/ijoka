@@ -24,6 +24,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 import graph_db_helper as db_helper
 from git_utils import resolve_project_path
 
+# Import semantic analyzer for intelligent observability
+try:
+    import semantic_analyzer
+    SEMANTIC_ANALYSIS_ENABLED = True
+except ImportError:
+    SEMANTIC_ANALYSIS_ENABLED = False
+
 # Background shell cache for linking BashOutput to original commands
 SHELL_CACHE_FILE = Path.home() / ".ijoka" / "background_shells.json"
 
@@ -490,6 +497,8 @@ def generate_workflow_nudges(
     """
     Generate workflow nudges based on current work patterns.
     Returns list of nudge messages to include in hook response.
+
+    Now includes intelligent semantic analysis for Edit/Write tools.
     """
     nudges = []
 
@@ -497,8 +506,56 @@ def generate_workflow_nudges(
     if is_mcp_meta_tool(tool_name) or is_diagnostic_command(tool_name, tool_input):
         return nudges
 
-    # 1. Commit frequency nudge (after 5+ file changes)
-    if tool_name in ("Edit", "Write"):
+    # 1. Intelligent semantic analysis for Edit/Write (if enabled)
+    if SEMANTIC_ANALYSIS_ENABLED and tool_name in ("Edit", "Write"):
+        try:
+            feature_desc = active_feature.get("description") if active_feature else None
+            analysis_result = semantic_analyzer.analyze_for_checkpoint(
+                tool_name=tool_name,
+                tool_input=tool_input,
+                feature_description=feature_desc
+            )
+
+            # Auto-checkpoint when logical unit detected
+            if analysis_result.get("should_checkpoint") and active_feature:
+                analysis = analysis_result.get("analysis", {})
+                summary = analysis.get("summary", "Progress checkpoint")
+                try:
+                    # Call ijoka checkpoint via CLI (non-blocking)
+                    import subprocess
+                    subprocess.Popen(
+                        ["ijoka", "checkpoint", "--activity", summary],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                except Exception:
+                    pass  # Don't fail if checkpoint fails
+
+            # Intelligent commit suggestion
+            if analysis_result.get("should_suggest_commit"):
+                commit_reason = analysis_result.get("commit_reason", "")
+                commit_msg = analysis_result.get("commit_message", "")
+                nudge_key = f"semantic_commit_{hash(commit_reason) % 10000}"
+
+                if not db_helper.has_been_nudged(session_id, nudge_key):
+                    if commit_msg:
+                        nudges.append(f"💡 {commit_reason}. Suggested: `git commit -m \"{commit_msg}\"`")
+                    else:
+                        nudges.append(f"💡 {commit_reason}. Consider committing your progress.")
+                    db_helper.record_nudge(session_id, nudge_key)
+
+                    # Clear logical units after suggesting commit
+                    semantic_analyzer.clear_logical_units()
+
+        except Exception as e:
+            # Log but don't fail
+            debug_log = Path.home() / ".ijoka" / "hook_debug.log"
+            with open(debug_log, "a") as f:
+                f.write(f"Semantic analysis error: {e}\n")
+
+    # 2. Fallback: Simple commit frequency nudge (after 5+ file changes)
+    # Only if semantic analysis didn't already suggest a commit
+    if tool_name in ("Edit", "Write") and not any("commit" in n.lower() for n in nudges):
         try:
             work_stats = db_helper.get_work_since_last_commit(session_id, project_dir)
             if work_stats["work_count"] >= 5 and not db_helper.has_been_nudged(session_id, "commit_reminder"):
