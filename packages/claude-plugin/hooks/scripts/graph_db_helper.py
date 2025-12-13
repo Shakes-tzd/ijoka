@@ -1057,6 +1057,22 @@ def has_been_nudged(session_id: str, nudge_type: str) -> bool:
     return bool(results and results[0].get("nudged"))
 
 
+def get_session_work_event_count(project_path: str, session_id: str) -> int:
+    """Count events in Session Work for current session."""
+    results = run_query(
+        """
+        MATCH (e:Event)-[:LINKED_TO]->(f:Feature)
+        WHERE f.is_session_work = true
+        AND e.session_id = $sessionId
+        RETURN count(e) as count
+        """,
+        {"sessionId": session_id}
+    )
+    count = results[0].get("count", 0) if results else 0
+    # Handle neo4j Integer type
+    return int(count) if count is not None else 0
+
+
 # =============================================================================
 # DEPRECATED - Import from feature_list.json
 # =============================================================================
