@@ -745,7 +745,7 @@ class IjokaClient:
                 node = record["s"]
                 step = Step(
                     id=node["id"],
-                    feature_id=node["feature_id"],
+                    feature_id=feature_id,  # Use param, not node (relationship-derived)
                     description=node["description"],
                     status=StepStatus(node["status"]),
                     step_order=int(node["step_order"]),
@@ -800,7 +800,7 @@ class IjokaClient:
             node = record["s"]
             return Step(
                 id=node["id"],
-                feature_id=node["feature_id"],
+                feature_id=feature_id,  # Use param, not node (relationship-derived)
                 description=node["description"],
                 status=StepStatus(node["status"]),
                 step_order=int(node["step_order"]),
@@ -853,6 +853,7 @@ class IjokaClient:
 
     def checkpoint(
         self,
+        feature_id: Optional[str] = None,
         step_completed: Optional[str] = None,
         current_activity: Optional[str] = None,
     ) -> dict:
@@ -860,6 +861,7 @@ class IjokaClient:
         Report progress with drift detection.
 
         Args:
+            feature_id: Feature ID (uses active feature if not provided)
             step_completed: Step description that was completed
             current_activity: What the agent is currently working on
 
@@ -867,7 +869,11 @@ class IjokaClient:
             Dict with warnings list if drift detected
         """
         warnings = []
-        active_feature = self.get_active_feature()
+
+        if feature_id:
+            active_feature = self.get_feature(feature_id)
+        else:
+            active_feature = self.get_active_feature()
 
         if not active_feature:
             warnings.append("No active feature - checkpoint ignored")
