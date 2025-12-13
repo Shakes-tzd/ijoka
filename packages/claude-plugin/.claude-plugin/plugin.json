@@ -15,5 +15,11 @@
     "workflow",
     "long-running",
     "observability"
-  ]
+  ],
+  "mcpServers": {
+    "ijoka": {
+      "command": "node",
+      "args": ["/Users/shakes/DevProjects/ijoka/packages/mcp-server/dist/index.js"]
+    }
+  }
 }

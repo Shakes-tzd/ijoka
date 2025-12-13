@@ -118,6 +118,50 @@ If no feature_id specified, starts the next available feature (highest priority 
     },
   },
   {
+    name: 'ijoka_list_features',
+    description: `List all features in the project with optional filtering by status or category.
+Returns features sorted by priority (highest first), then by creation date.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['pending', 'in_progress', 'blocked', 'complete'],
+          description: 'Filter by status (optional)',
+        },
+        category: {
+          type: 'string',
+          enum: [
+            'functional',
+            'ui',
+            'security',
+            'performance',
+            'documentation',
+            'testing',
+            'infrastructure',
+            'refactoring',
+            'planning',
+            'meta',
+          ],
+          description: 'Filter by category (optional)',
+        },
+        project_path: {
+          type: 'string',
+          description: 'Project path (defaults to current working directory)',
+        },
+        source_agent: {
+          type: 'string',
+          description: 'Agent identifier (e.g., claude-code, gemini-cli, codex-cli). Required for non-Claude tools.',
+        },
+        session_id: {
+          type: 'string',
+          description: 'Unique session identifier from the calling agent',
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'ijoka_block_feature',
     description: `Report that work on a feature is blocked.`,
     inputSchema: {

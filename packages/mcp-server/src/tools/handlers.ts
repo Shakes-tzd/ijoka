@@ -37,6 +37,9 @@ export async function handleToolCall(
     case 'ijoka_block_feature':
       result = await handleBlockFeature(args);
       break;
+    case 'ijoka_list_features':
+      result = await handleListFeatures(args);
+      break;
     case 'ijoka_record_insight':
       result = await handleRecordInsight(args);
       break;
@@ -225,6 +228,41 @@ async function handleCompleteFeature(args: Record<string, unknown>): Promise<Too
     feature,
     stats,
     message: `Completed feature: ${feature.description}`,
+  };
+}
+
+async function handleListFeatures(args: Record<string, unknown>): Promise<ToolResult> {
+  const projectPath = getProjectPath(args.project_path as string | undefined);
+  const statusFilter = args.status as string | undefined;
+  const categoryFilter = args.category as string | undefined;
+
+  // Get all features for the project
+  let features = await db.getFeaturesForProject(projectPath);
+
+  // Apply filters
+  if (statusFilter) {
+    features = features.filter((f) => f.status === statusFilter);
+  }
+  if (categoryFilter) {
+    features = features.filter((f) => f.category === categoryFilter);
+  }
+
+  // Get stats for context
+  const stats = await db.getProjectStats(projectPath);
+
+  return {
+    success: true,
+    features: features.map((f) => ({
+      id: f.id,
+      description: f.description,
+      category: f.category,
+      status: f.status,
+      priority: f.priority,
+      work_count: f.work_count,
+      assigned_agent: f.assigned_agent,
+    })),
+    count: features.length,
+    stats,
   };
 }
 

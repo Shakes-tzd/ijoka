@@ -1,0 +1,41 @@
+[project]
+name = "ijoka"
+version = "0.1.0"
+description = "CLI and SDK for AI agent observability and orchestration"
+readme = "README.md"
+authors = [
+    { name = "Shakes-tzd", email = "shakestzd@gmail.com" }
+]
+requires-python = ">=3.12"
+keywords = ["cli", "ai", "agent", "observability", "orchestration"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = [
+    "fastapi>=0.124.4",
+    "loguru>=0.7.3",
+    "neo4j>=6.0.3",
+    "pydantic>=2.12.5",
+    "rich>=14.2.0",
+    "typer>=0.20.0",
+    "uvicorn[standard]>=0.38.0",
+]
+
+[project.scripts]
+ijoka = "ijoka.cli:app"
+ijoka-server = "ijoka.api:run_server"
+
+[build-system]
+requires = ["uv_build>=0.8.0,<0.9"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.19.0",
+    "pytest>=9.0.2",
+    "ruff>=0.14.9",
+]

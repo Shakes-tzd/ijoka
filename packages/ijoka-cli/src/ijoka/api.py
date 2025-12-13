@@ -1,0 +1,720 @@
+"""
+FastAPI server for Ijoka.
+
+Provides HTTP API for remote/multi-agent access to Ijoka features.
+
+Usage:
+    # Start server
+    ijoka-server
+    # or
+    uvicorn ijoka.api:app --reload
+
+    # Call endpoints
+    curl http://localhost:8000/status
+    curl http://localhost:8000/features
+    curl -X POST http://localhost:8000/features -d '{"description": "...", "category": "functional"}'
+"""
+
+from contextlib import asynccontextmanager
+from typing import Optional
+
+from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel, Field
+
+from .db import IjokaClient
+from .models import (
+    Feature,
+    FeatureCategory,
+    FeatureListItem,
+    FeatureStatus,
+    Insight,
+    InsightType,
+    Project,
+    ProjectStats,
+    Step,
+)
+
+
+# =============================================================================
+# REQUEST/RESPONSE MODELS
+# =============================================================================
+
+
+class CreateFeatureRequest(BaseModel):
+    """Request to create a new feature."""
+    description: str = Field(..., min_length=1, description="Feature description")
+    category: FeatureCategory = Field(..., description="Feature category")
+    priority: int = Field(default=50, ge=-100, le=100, description="Priority (higher = more important)")
+    steps: Optional[list[str]] = Field(default=None, description="Implementation steps")
+    branch_hint: Optional[str] = Field(default=None, description="Git branch hint")
+    file_patterns: Optional[list[str]] = Field(default=None, description="File patterns for classification")
+
+
+class UpdateFeatureRequest(BaseModel):
+    """Request to update a feature."""
+    description: Optional[str] = Field(default=None, min_length=1)
+    category: Optional[FeatureCategory] = None
+    priority: Optional[int] = Field(default=None, ge=-100, le=100)
+
+
+class BlockFeatureRequest(BaseModel):
+    """Request to block a feature."""
+    reason: str = Field(..., min_length=1, description="Why the feature is blocked")
+    blocking_feature_id: Optional[str] = Field(default=None, description="ID of blocking feature")
+
+
+class RecordInsightRequest(BaseModel):
+    """Request to record an insight."""
+    description: str = Field(..., min_length=1, description="What was learned")
+    pattern_type: InsightType = Field(..., description="Type of insight")
+    tags: Optional[list[str]] = Field(default=None, description="Tags for categorization")
+    feature_id: Optional[str] = Field(default=None, description="Related feature ID")
+
+
+class StatusResponse(BaseModel):
+    """Response for status endpoint."""
+    success: bool = True
+    project: Project
+    stats: ProjectStats
+    current_feature: Optional[Feature] = None
+
+
+class FeatureListResponse(BaseModel):
+    """Response for feature list endpoint."""
+    success: bool = True
+    features: list[FeatureListItem]
+    count: int
+    stats: ProjectStats
+
+
+class FeatureResponse(BaseModel):
+    """Response for single feature operations."""
+    success: bool = True
+    feature: Feature
+    message: Optional[str] = None
+
+
+class InsightListResponse(BaseModel):
+    """Response for insight list endpoint."""
+    success: bool = True
+    insights: list[Insight]
+    count: int
+
+
+class InsightResponse(BaseModel):
+    """Response for single insight operations."""
+    success: bool = True
+    insight: Insight
+    message: Optional[str] = None
+
+
+class MessageResponse(BaseModel):
+    """Generic message response."""
+    success: bool = True
+    message: str
+
+
+class SetPlanRequest(BaseModel):
+    """Request to set plan for a feature."""
+    steps: list[str] = Field(..., min_length=1, description="Ordered list of implementation steps")
+
+
+class CheckpointRequest(BaseModel):
+    """Request to report progress checkpoint."""
+    step_completed: Optional[str] = Field(default=None, description="Step just completed")
+    current_activity: Optional[str] = Field(default=None, description="Current work")
+
+
+class DiscoverFeatureRequest(BaseModel):
+    """Request to discover and create feature from recent activity."""
+    description: str = Field(..., min_length=1)
+    category: FeatureCategory
+    priority: int = Field(default=50, ge=-100, le=100)
+    steps: Optional[list[str]] = None
+    lookback_minutes: int = Field(default=60, ge=1)
+    mark_complete: bool = False
+
+
+class PlanResponse(BaseModel):
+    """Response for plan operations."""
+    success: bool = True
+    feature_id: str
+    steps: list[dict]  # Step info
+    active_step: Optional[dict] = None
+    progress: dict
+    message: Optional[str] = None
+
+
+class CheckpointResponse(BaseModel):
+    """Response for checkpoint operations."""
+    success: bool = True
+    feature: Optional[dict] = None
+    active_step: Optional[dict] = None
+    progress: dict
+    warnings: list[str] = Field(default_factory=list)
+
+
+# =============================================================================
+# APP SETUP
+# =============================================================================
+
+
+# Global client - initialized on startup
+_client: Optional[IjokaClient] = None
+
+
+def get_client() -> IjokaClient:
+    """Get the global client instance."""
+    if _client is None:
+        raise HTTPException(status_code=503, detail="Database not connected")
+    return _client
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage app lifecycle - connect/disconnect from database."""
+    global _client
+    _client = IjokaClient()
+    _client.ensure_project()
+    yield
+    if _client:
+        _client.close()
+        _client = None
+
+
+app = FastAPI(
+    title="Ijoka API",
+    description="HTTP API for AI agent observability and orchestration",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+
+# =============================================================================
+# STATUS ENDPOINTS
+# =============================================================================
+
+
+@app.get("/", response_model=MessageResponse, tags=["Status"])
+async def root():
+    """API root - health check."""
+    return MessageResponse(message="Ijoka API is running")
+
+
+@app.get("/status", response_model=StatusResponse, tags=["Status"])
+async def get_status():
+    """Get current project status."""
+    client = get_client()
+    project = client.ensure_project()
+    stats = client.get_stats()
+    current_feature = client.get_active_feature()
+
+    return StatusResponse(
+        project=project,
+        stats=stats,
+        current_feature=current_feature,
+    )
+
+
+# =============================================================================
+# FEATURE ENDPOINTS
+# =============================================================================
+
+
+@app.get("/features", response_model=FeatureListResponse, tags=["Features"])
+async def list_features(
+    status: Optional[FeatureStatus] = Query(default=None, description="Filter by status"),
+    category: Optional[FeatureCategory] = Query(default=None, description="Filter by category"),
+):
+    """List all features with optional filtering."""
+    client = get_client()
+    status_str = status.value if status else None
+    category_str = category.value if category else None
+
+    features = client.list_features(status=status_str, category=category_str)
+    stats = client.get_stats()
+
+    return FeatureListResponse(
+        features=features,
+        count=len(features),
+        stats=stats,
+    )
+
+
+@app.get("/features/{feature_id}", response_model=FeatureResponse, tags=["Features"])
+async def get_feature(feature_id: str):
+    """Get a specific feature by ID."""
+    client = get_client()
+    feature = client.get_feature(feature_id)
+
+    if not feature:
+        raise HTTPException(status_code=404, detail=f"Feature not found: {feature_id}")
+
+    return FeatureResponse(feature=feature)
+
+
+@app.post("/features", response_model=FeatureResponse, tags=["Features"])
+async def create_feature(request: CreateFeatureRequest):
+    """Create a new feature."""
+    client = get_client()
+
+    feature = client.create_feature(
+        description=request.description,
+        category=request.category.value,
+        priority=request.priority,
+        steps=request.steps,
+        branch_hint=request.branch_hint,
+        file_patterns=request.file_patterns,
+    )
+
+    return FeatureResponse(
+        feature=feature,
+        message=f"Created feature: {feature.description}",
+    )
+
+
+@app.post("/features/{feature_id}/start", response_model=FeatureResponse, tags=["Features"])
+async def start_feature(feature_id: str, agent: str = Query(default="api", description="Agent identifier")):
+    """Start working on a feature."""
+    client = get_client()
+
+    try:
+        feature = client.start_feature(feature_id=feature_id, agent=agent)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return FeatureResponse(
+        feature=feature,
+        message=f"Started feature: {feature.description}",
+    )
+
+
+@app.post("/features/next/start", response_model=FeatureResponse, tags=["Features"])
+async def start_next_feature(agent: str = Query(default="api", description="Agent identifier")):
+    """Start the next available feature (highest priority pending)."""
+    client = get_client()
+
+    try:
+        feature = client.start_feature(agent=agent)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return FeatureResponse(
+        feature=feature,
+        message=f"Started feature: {feature.description}",
+    )
+
+
+@app.post("/features/{feature_id}/complete", response_model=FeatureResponse, tags=["Features"])
+async def complete_feature(feature_id: str, summary: Optional[str] = Query(default=None)):
+    """Mark a feature as complete."""
+    client = get_client()
+
+    try:
+        feature = client.complete_feature(feature_id=feature_id, summary=summary)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return FeatureResponse(
+        feature=feature,
+        message=f"Completed feature: {feature.description}",
+    )
+
+
+@app.post("/features/{feature_id}/block", response_model=FeatureResponse, tags=["Features"])
+async def block_feature(feature_id: str, request: BlockFeatureRequest):
+    """Mark a feature as blocked."""
+    client = get_client()
+
+    try:
+        feature = client.block_feature(
+            feature_id=feature_id,
+            reason=request.reason,
+            blocking_feature_id=request.blocking_feature_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return FeatureResponse(
+        feature=feature,
+        message=f"Blocked feature: {feature.description}",
+    )
+
+
+@app.patch("/features/{feature_id}", response_model=FeatureResponse, tags=["Features"])
+async def update_feature(feature_id: str, request: UpdateFeatureRequest):
+    """Update a feature's properties."""
+    client = get_client()
+
+    try:
+        feature = client.update_feature(
+            feature_id=feature_id,
+            description=request.description,
+            category=request.category.value if request.category else None,
+            priority=request.priority,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return FeatureResponse(
+        feature=feature,
+        message=f"Updated feature: {feature.description}",
+    )
+
+
+@app.delete("/features/{feature_id}", response_model=MessageResponse, tags=["Features"])
+async def archive_feature(feature_id: str):
+    """Archive (delete) a feature."""
+    client = get_client()
+    success = client.archive_feature(feature_id)
+
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Feature not found: {feature_id}")
+
+    return MessageResponse(message=f"Archived feature: {feature_id}")
+
+
+# =============================================================================
+# PLAN ENDPOINTS
+# =============================================================================
+
+
+@app.post("/features/{feature_id}/plan", response_model=PlanResponse, tags=["Planning"])
+async def set_plan_for_feature(feature_id: str, request: SetPlanRequest):
+    """Set implementation plan for a specific feature."""
+    client = get_client()
+
+    try:
+        # Check if feature exists
+        feature = client.get_feature(feature_id)
+        if not feature:
+            raise HTTPException(status_code=404, detail=f"Feature not found: {feature_id}")
+
+        # Set plan (method to be implemented in db.py)
+        if not hasattr(client, 'set_plan'):
+            raise HTTPException(
+                status_code=501,
+                detail="set_plan not yet implemented in database client"
+            )
+
+        steps = client.set_plan(feature_id=feature_id, steps=request.steps)
+
+        # Calculate progress
+        total = len(steps)
+        completed = sum(1 for s in steps if s.get('status') == 'completed')
+        progress = {
+            'total': total,
+            'completed': completed,
+            'remaining': total - completed,
+            'percentage': int((completed / total * 100)) if total > 0 else 0,
+        }
+
+        # Find active step
+        active_step = next((s for s in steps if s.get('status') == 'in_progress'), None)
+
+        return PlanResponse(
+            feature_id=feature_id,
+            steps=steps,
+            active_step=active_step,
+            progress=progress,
+            message=f"Set plan with {total} steps for feature: {feature.description}",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/features/{feature_id}/plan", response_model=PlanResponse, tags=["Planning"])
+async def get_plan_for_feature(feature_id: str):
+    """Get implementation plan for a specific feature."""
+    client = get_client()
+
+    try:
+        # Check if feature exists
+        feature = client.get_feature(feature_id)
+        if not feature:
+            raise HTTPException(status_code=404, detail=f"Feature not found: {feature_id}")
+
+        # Get plan (method to be implemented in db.py)
+        if not hasattr(client, 'get_plan'):
+            raise HTTPException(
+                status_code=501,
+                detail="get_plan not yet implemented in database client"
+            )
+
+        steps = client.get_plan(feature_id=feature_id)
+
+        # Calculate progress
+        total = len(steps)
+        completed = sum(1 for s in steps if s.get('status') == 'completed')
+        progress = {
+            'total': total,
+            'completed': completed,
+            'remaining': total - completed,
+            'percentage': int((completed / total * 100)) if total > 0 else 0,
+        }
+
+        # Find active step
+        active_step = next((s for s in steps if s.get('status') == 'in_progress'), None)
+
+        return PlanResponse(
+            feature_id=feature_id,
+            steps=steps,
+            active_step=active_step,
+            progress=progress,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/plan", response_model=PlanResponse, tags=["Planning"])
+async def set_plan_for_active(request: SetPlanRequest):
+    """Set implementation plan for the active feature."""
+    client = get_client()
+
+    try:
+        # Get active feature
+        feature = client.get_active_feature()
+        if not feature:
+            raise HTTPException(status_code=404, detail="No active feature")
+
+        # Set plan (method to be implemented in db.py)
+        if not hasattr(client, 'set_plan'):
+            raise HTTPException(
+                status_code=501,
+                detail="set_plan not yet implemented in database client"
+            )
+
+        steps = client.set_plan(feature_id=feature.id, steps=request.steps)
+
+        # Calculate progress
+        total = len(steps)
+        completed = sum(1 for s in steps if s.get('status') == 'completed')
+        progress = {
+            'total': total,
+            'completed': completed,
+            'remaining': total - completed,
+            'percentage': int((completed / total * 100)) if total > 0 else 0,
+        }
+
+        # Find active step
+        active_step = next((s for s in steps if s.get('status') == 'in_progress'), None)
+
+        return PlanResponse(
+            feature_id=feature.id,
+            steps=steps,
+            active_step=active_step,
+            progress=progress,
+            message=f"Set plan with {total} steps for active feature: {feature.description}",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/plan", response_model=PlanResponse, tags=["Planning"])
+async def get_plan_for_active():
+    """Get implementation plan for the active feature."""
+    client = get_client()
+
+    try:
+        # Get active feature
+        feature = client.get_active_feature()
+        if not feature:
+            raise HTTPException(status_code=404, detail="No active feature")
+
+        # Get plan (method to be implemented in db.py)
+        if not hasattr(client, 'get_plan'):
+            raise HTTPException(
+                status_code=501,
+                detail="get_plan not yet implemented in database client"
+            )
+
+        steps = client.get_plan(feature_id=feature.id)
+
+        # Calculate progress
+        total = len(steps)
+        completed = sum(1 for s in steps if s.get('status') == 'completed')
+        progress = {
+            'total': total,
+            'completed': completed,
+            'remaining': total - completed,
+            'percentage': int((completed / total * 100)) if total > 0 else 0,
+        }
+
+        # Find active step
+        active_step = next((s for s in steps if s.get('status') == 'in_progress'), None)
+
+        return PlanResponse(
+            feature_id=feature.id,
+            steps=steps,
+            active_step=active_step,
+            progress=progress,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# =============================================================================
+# CHECKPOINT ENDPOINT
+# =============================================================================
+
+
+@app.post("/checkpoint", response_model=CheckpointResponse, tags=["Planning"])
+async def report_checkpoint(request: CheckpointRequest):
+    """Report progress checkpoint for the active feature."""
+    client = get_client()
+
+    try:
+        # Get active feature
+        feature = client.get_active_feature()
+        if not feature:
+            raise HTTPException(status_code=404, detail="No active feature")
+
+        # Record checkpoint (method to be implemented in db.py)
+        if not hasattr(client, 'checkpoint'):
+            raise HTTPException(
+                status_code=501,
+                detail="checkpoint not yet implemented in database client"
+            )
+
+        result = client.checkpoint(
+            feature_id=feature.id,
+            step_completed=request.step_completed,
+            current_activity=request.current_activity,
+        )
+
+        # Extract data from result
+        steps = result.get('steps', [])
+        active_step = result.get('active_step')
+        warnings = result.get('warnings', [])
+
+        # Calculate progress
+        total = len(steps)
+        completed = sum(1 for s in steps if s.get('status') == 'completed')
+        progress = {
+            'total': total,
+            'completed': completed,
+            'remaining': total - completed,
+            'percentage': int((completed / total * 100)) if total > 0 else 0,
+        }
+
+        return CheckpointResponse(
+            feature={'id': feature.id, 'description': feature.description},
+            active_step=active_step,
+            progress=progress,
+            warnings=warnings,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# =============================================================================
+# DISCOVER FEATURE ENDPOINT
+# =============================================================================
+
+
+@app.post("/features/discover", response_model=FeatureResponse, tags=["Features"])
+async def discover_feature(request: DiscoverFeatureRequest):
+    """Discover and create feature from recent activity."""
+    client = get_client()
+
+    try:
+        # Discover feature (method to be implemented in db.py)
+        if not hasattr(client, 'discover_feature'):
+            raise HTTPException(
+                status_code=501,
+                detail="discover_feature not yet implemented in database client"
+            )
+
+        feature = client.discover_feature(
+            description=request.description,
+            category=request.category.value,
+            priority=request.priority,
+            steps=request.steps,
+            lookback_minutes=request.lookback_minutes,
+            mark_complete=request.mark_complete,
+        )
+
+        message = f"Discovered and created feature: {feature.description}"
+        if request.mark_complete:
+            message = f"Discovered and completed feature: {feature.description}"
+
+        return FeatureResponse(
+            feature=feature,
+            message=message,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# =============================================================================
+# INSIGHT ENDPOINTS
+# =============================================================================
+
+
+@app.get("/insights", response_model=InsightListResponse, tags=["Insights"])
+async def list_insights(
+    query: Optional[str] = Query(default=None, description="Search query"),
+    tags: Optional[str] = Query(default=None, description="Comma-separated tags"),
+    limit: int = Query(default=10, ge=1, le=100, description="Max results"),
+):
+    """List insights with optional filtering."""
+    client = get_client()
+    tag_list = [t.strip() for t in tags.split(",")] if tags else None
+
+    insights = client.list_insights(query=query, tags=tag_list, limit=limit)
+
+    return InsightListResponse(
+        insights=insights,
+        count=len(insights),
+    )
+
+
+@app.post("/insights", response_model=InsightResponse, tags=["Insights"])
+async def record_insight(request: RecordInsightRequest):
+    """Record a new insight."""
+    client = get_client()
+
+    insight = client.record_insight(
+        description=request.description,
+        pattern_type=request.pattern_type.value,
+        tags=request.tags,
+        feature_id=request.feature_id,
+    )
+
+    return InsightResponse(
+        insight=insight,
+        message=f"Recorded insight: {insight.description[:50]}...",
+    )
+
+
+# =============================================================================
+# SERVER ENTRY POINT
+# =============================================================================
+
+
+def run_server(
+    host: str = "0.0.0.0",
+    port: int = 8000,
+    reload: bool = False,
+):
+    """
+    Run the FastAPI server.
+
+    Args:
+        host: Host to bind to (default: 0.0.0.0)
+        port: Port to bind to (default: 8000)
+        reload: Enable auto-reload for development
+    """
+    import uvicorn
+
+    print(f"Starting Ijoka API server on http://{host}:{port}")
+    print(f"Swagger UI: http://{host}:{port}/docs")
+    print(f"OpenAPI spec: http://{host}:{port}/openapi.json")
+
+    uvicorn.run("ijoka.api:app", host=host, port=port, reload=reload)
+
+
+if __name__ == "__main__":
+    import sys
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
+    run_server(port=port)
