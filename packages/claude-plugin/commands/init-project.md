@@ -10,8 +10,10 @@ Registers the current project in Ijoka's Memgraph database and helps you define 
 
 Before running this command, ensure:
 1. **Memgraph is running**: `docker compose up -d` (from ijoka repo)
-2. **Claude plugin is installed**: The Ijoka MCP tools must be available
+2. **Ijoka CLI is installed**: `ijoka --version` should work (OR MCP tools available)
 3. **uv is installed**: `uv --version` should show 0.8.0+ for full Python support
+
+⚠️ **Note:** MCP server is deprecated. Prefer CLI commands for new projects.
 
 ## Usage
 
@@ -49,11 +51,11 @@ Claude will:
 
 ## Workflow After Initialization
 
-1. At session start, run `/ijoka:start` or check `ijoka_status`
-2. Use `ijoka_start_feature` to begin work (or `/next-feature`)
+1. At session start, run `/ijoka:start` or `ijoka status` CLI
+2. Use `ijoka feature start <ID>` CLI to begin work (or `/next-feature`)
 3. Work on ONE feature at a time
-4. Use `ijoka_complete_feature` when done (or `/complete-feature`)
-5. Use `ijoka_set_plan` to declare implementation steps
+4. Use `ijoka feature complete` CLI when done (or `/complete-feature`)
+5. Use `ijoka plan set` CLI to declare implementation steps
 
 ## Instructions for Claude
 
@@ -130,7 +132,7 @@ python3 script.py
 
 ### Step 5: Check Connectivity
 
-- Call `ijoka_status` to verify Memgraph is running
+- Use `ijoka_status` MCP tool OR `ijoka status` CLI to verify Memgraph is running
 - If connection fails, inform user to start Memgraph: `docker compose up -d`
 
 ### Step 6: Gather Project Info
@@ -147,13 +149,17 @@ Help identify 5-10 initial features:
 
 ### Step 8: Create Features
 
-For each feature, call `ijoka_create_feature` with:
-```
+For each feature, use `ijoka_create_feature` MCP tool OR CLI:
+```bash
+# MCP tool
 ijoka_create_feature:
   description: "Feature description"
   category: "functional|ui|security|etc"
   steps: ["Step 1", "Step 2", ...]
   priority: 100  # Decrease by 10 for each subsequent feature
+
+# OR CLI
+ijoka feature create --category "functional" --priority 100 "Feature description"
 ```
 
 ### Step 9: Confirm Setup

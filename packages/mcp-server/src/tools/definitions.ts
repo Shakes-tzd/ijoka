@@ -1,18 +1,21 @@
 /**
  * MCP Tool Definitions
  *
+ * @deprecated This MCP server is DEPRECATED. Use the Ijoka CLI or REST API instead.
+ *
  * Defines the schema for all Ijoka tools.
  * These definitions are sent to the client on ListTools request.
  *
- * IMPORTANT: These MCP tools are the ONLY interface for Ijoka operations.
- * Never bypass MCP by calling Python scripts or database queries directly.
+ * MIGRATION:
+ * - CLI: `ijoka status`, `ijoka feature list`, `ijoka feature start <ID>`, etc.
+ * - REST API: Start with `ijoka-server`, then use http://localhost:8000
  */
 
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 
 /**
  * Enforcement notice included in primary tool description.
- * This ensures agents see the MCP-first mandate on every status check.
+ * Updated to direct agents to CLI/API instead.
  */
 const MCP_ENFORCEMENT = `
 

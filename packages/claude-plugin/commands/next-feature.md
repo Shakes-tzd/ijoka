@@ -5,9 +5,11 @@ Start working on the next available feature from the Ijoka graph database.
 ## What This Command Does
 
 1. Queries Memgraph for the next pending feature (highest priority, unblocked)
-2. Calls `ijoka_start_feature` to set it as active
+2. Starts the feature (sets it as active)
 3. Displays the feature details and any defined steps
-4. Optionally sets up a plan with `ijoka_set_plan`
+4. Optionally sets up a plan
+
+⚠️ **Note:** MCP server is deprecated. Use CLI commands when MCP tools are unavailable.
 
 ## Usage
 
@@ -20,9 +22,9 @@ Optionally specify a category: `/next-feature security`
 User: `/next-feature`
 
 Claude will:
-1. Call `ijoka_status` to see available features
+1. Get current status (MCP: `ijoka_status` OR CLI: `ijoka status`)
 2. Find next pending feature (highest priority)
-3. Call `ijoka_start_feature` to activate it
+3. Start the feature (MCP: `ijoka_start_feature` OR CLI: `ijoka feature start <ID>`)
 4. Display the feature details
 5. Ask if you want to create a step plan
 
@@ -40,7 +42,7 @@ When category specified:
 
 When the user runs this command:
 
-1. **Get current status** - Call `ijoka_status`
+1. **Get current status** - Use `ijoka_status` MCP tool OR `ijoka status` CLI
    - Check if there's already an active feature
    - If yes, ask: "You have an active feature. Complete it first or switch?"
 
@@ -50,7 +52,7 @@ When the user runs this command:
    - Select highest priority unblocked feature
    - If no features available, suggest `/add-feature`
 
-3. **Start the feature** - Call `ijoka_start_feature` with the feature_id
+3. **Start the feature** - Use `ijoka_start_feature` MCP tool OR `ijoka feature start <ID>` CLI
 
 4. **Display feature info**:
    ```
@@ -67,7 +69,7 @@ When the user runs this command:
    ```
 
 5. **Offer to create plan** - Ask if they want to set up a detailed plan:
-   - If yes, help define steps and call `ijoka_set_plan`
+   - If yes, help define steps (MCP: `ijoka_set_plan` OR CLI: `ijoka plan set`)
    - If no, proceed with implementation
 
 6. **Begin work** - Start implementing the feature
@@ -77,5 +79,5 @@ When the user runs this command:
 - Only work on ONE feature at a time
 - Complete each step before moving on
 - Test thoroughly before marking as complete
-- Use `ijoka_checkpoint` to report progress
+- Report progress (MCP: `ijoka_checkpoint` OR CLI: `ijoka checkpoint`)
 - Use `/complete-feature` when done

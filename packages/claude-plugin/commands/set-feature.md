@@ -22,19 +22,21 @@ Examples:
 
 ## What This Command Does
 
-1. Queries Memgraph for matching features via `ijoka_status`
+1. Queries Memgraph for matching features
 2. Finds the best match based on input
 3. If feature is complete, offers options:
    - A) Reopen it (set back to in_progress)
    - B) Create a follow-up feature
-4. Calls `ijoka_start_feature` to activate the target feature
+4. Activates the target feature
 5. Confirms the switch
+
+⚠️ **Note:** MCP server is deprecated. Use CLI commands when MCP tools are unavailable.
 
 ## Instructions for Claude
 
 When the user runs this command or when you identify work relates to a specific feature:
 
-1. **Get all features** - Call `ijoka_status`
+1. **Get all features** - Use `ijoka_status` MCP tool OR `ijoka status` CLI
 
 2. **Match the input** (from $ARGUMENTS) to a feature by:
    - Exact ID match
@@ -56,7 +58,7 @@ When the user runs this command or when you identify work relates to a specific 
    ```
    - Wait for user choice before proceeding
 
-5. **Activate the feature** - Call `ijoka_start_feature` with the feature_id
+5. **Activate the feature** - Use `ijoka_start_feature` MCP tool OR `ijoka feature start <ID>` CLI
    - Multiple features can be in_progress simultaneously
 
 6. **Confirm**: "Now tracking activity for: [feature description]"
@@ -66,7 +68,7 @@ When the user runs this command or when you identify work relates to a specific 
 Before working on any task, Claude should proactively:
 
 1. **Analyze the user's request** - What are they asking for?
-2. **Check features via ijoka_status** - Does this relate to an existing feature?
+2. **Check features** - Use `ijoka_status` MCP tool OR `ijoka status` CLI
 3. **Match by keywords** - Look for overlapping terms in descriptions
 4. **Consider completed features** - If the request relates to a "done" feature, use this command
 
@@ -88,7 +90,7 @@ B) Create a new 'Bug fix: Login form issue' feature"
 
 User: "A"
 
-Claude: [Calls ijoka_start_feature to reopen]
+Claude: [Uses ijoka_start_feature MCP or `ijoka feature start <ID>` CLI to reopen]
 Claude: "Now tracking activity for: User authentication with OAuth"
 [Proceeds to fix the bug, all tool calls are linked to this feature]
 ```

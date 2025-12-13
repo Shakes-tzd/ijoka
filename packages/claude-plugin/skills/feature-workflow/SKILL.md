@@ -14,6 +14,8 @@ Activate this skill when:
 
 Ijoka uses **Memgraph** (graph database) as the single source of truth for features, sessions, and activity. This solves the core challenge of long-running agents: maintaining context across multiple sessions.
 
+**Interface:** Use the `ijoka` CLI or REST API (port 8000) for all operations. MCP is deprecated.
+
 ### Data Architecture
 
 ```
@@ -68,25 +70,25 @@ This means:
 
 ### At Session Start
 
-1. Run `/ijoka:start` or call `ijoka_status`
+1. Run `/ijoka:start` or `ijoka status`
 2. Check overall progress (X/Y complete)
 3. Identify the active feature (status: in_progress)
-4. Review the plan if one exists (`ijoka_get_plan`)
+4. Review the plan if one exists (`ijoka plan show`)
 
 ### BEFORE Any Work (CRITICAL)
 
 Before implementing anything, you MUST:
 
 1. **Analyze the user's request** - What are they asking for?
-2. **Check features via `ijoka_status`** - Does this relate to an existing feature?
+2. **Check features via `ijoka status`** - Does this relate to an existing feature?
 3. **Match to a feature** - Find the most relevant feature by:
    - Keywords in descriptions
    - Category match
    - Related functionality
 4. **Handle completed features** - If work relates to a completed feature:
-   - **Option A**: Reopen it (call `ijoka_start_feature`)
-   - **Option B**: Create a follow-up feature (`ijoka_create_feature`)
-5. **Set the active feature** - Call `ijoka_start_feature` on the correct feature
+   - **Option A**: Reopen it (`ijoka feature start <ID>`)
+   - **Option B**: Create a follow-up feature (`ijoka feature create`)
+5. **Set the active feature** - Run `ijoka feature start <ID>` on the correct feature
 
 ### Working on Completed Features
 
@@ -96,26 +98,26 @@ If a user asks to fix/enhance something related to a completed feature:
 User: "Fix the login form validation"
 
 Claude:
-1. Calls ijoka_status... "User authentication" is marked complete
+1. Runs `ijoka status`... "User authentication" is marked complete
 2. This relates to that feature
 3. Ask user:
    "This relates to 'User authentication' which is complete.
    Should I:
    A) Reopen it for this fix
    B) Create a new bug-fix feature"
-4. Call ijoka_start_feature accordingly
+4. Run `ijoka feature start <ID>` accordingly
 5. Proceed with the fix (now properly tracked)
 ```
 
 ### During Session
 
 1. Ensure correct feature has status: in_progress
-2. Optionally set a plan with `ijoka_set_plan`
+2. Optionally set a plan with `ijoka plan set`
 3. Implement the feature thoroughly
-4. Use `ijoka_checkpoint` to report progress
+4. Use `ijoka checkpoint` to report progress
 5. Test using the verification steps
 6. When complete:
-   - Call `ijoka_complete_feature`
+   - Run `ijoka feature complete`
 7. Commit the code changes
 
 ### Critical Rules
@@ -128,31 +130,41 @@ Claude:
 4. **Work on ONE feature** at a time
 5. **Complete fully** before marking as done
 6. **Leave code in working state** at session end
-7. **Commit frequently** - Use `ijoka_checkpoint` to track progress
+7. **Commit frequently** - Use `ijoka checkpoint` to track progress
 
-## MCP Tools (REQUIRED Interface)
+## CLI Commands (REQUIRED Interface)
 
-**CRITICAL: ALWAYS use `ijoka_*` MCP tools for ALL Ijoka operations.**
+**CRITICAL: ALWAYS use `ijoka` CLI commands for ALL Ijoka operations.**
 
-Never bypass MCP by:
+Never bypass the CLI by:
 - Calling Python scripts directly (e.g., `uv run graph_db_helper.py`)
 - Running database queries directly
 - Using internal APIs
 
-MCP tools provide validation, audit trails, StatusEvents, and work across all AI clients (Claude Code, Cursor, Windsurf, Gemini, Codex, etc).
+The CLI provides validation, audit trails, and a consistent interface.
 
-| Tool | Purpose |
-|------|---------|
-| `ijoka_status` | Get project status, active features, progress |
-| `ijoka_start_feature` | Start working on a feature |
-| `ijoka_complete_feature` | Mark feature as complete |
-| `ijoka_block_feature` | Report a blocker |
-| `ijoka_create_feature` | Create a new feature |
-| `ijoka_set_plan` | Declare implementation steps |
-| `ijoka_get_plan` | Get current plan status |
-| `ijoka_checkpoint` | Report progress, get feedback |
-| `ijoka_record_insight` | Save a reusable learning |
-| `ijoka_get_insights` | Retrieve relevant insights |
+| Command | Purpose |
+|---------|---------|
+| `ijoka status` | Get project status, active features, progress |
+| `ijoka feature list` | List all features with status |
+| `ijoka feature start [ID]` | Start working on a feature |
+| `ijoka feature complete` | Mark feature as complete |
+| `ijoka feature block --reason` | Report a blocker |
+| `ijoka feature create` | Create a new feature |
+| `ijoka plan set` | Declare implementation steps |
+| `ijoka plan show` | Get current plan status |
+| `ijoka checkpoint` | Report progress, get feedback |
+| `ijoka insight record` | Save a reusable learning |
+| `ijoka insight list` | Retrieve relevant insights |
+| `ijoka analytics digest` | Get daily insights digest |
+| `ijoka analytics ask` | Natural language query |
+
+Add `--json` to any command for JSON output (useful for parsing).
+
+**REST API Alternative (http://localhost:8000):**
+Start with `ijoka-server`, then use standard HTTP requests.
+
+⚠️ **MCP Server is DEPRECATED** - Use CLI or REST API instead.
 
 ## Commands Available
 
@@ -169,16 +181,16 @@ MCP tools provide validation, audit trails, StatusEvents, and work across all AI
 
 ```
 Session Start:
-→ Run /ijoka:start
+→ Run /ijoka:start or `ijoka status`
 → "Progress: 5/12 features complete (42%)"
 → "Active: [security] Input validation"
 → "Plan: 2/4 steps complete"
 
 Working:
 → Claude continues with "Input validation" feature
-→ Calls ijoka_checkpoint after each step
+→ Runs `ijoka checkpoint` after each step
 → Tests validation thoroughly
-→ Calls ijoka_complete_feature
+→ Runs `ijoka feature complete`
 → Commits code
 
 Session End:

@@ -36,7 +36,8 @@ ijoka/
 | Frontend | Vue 3 + TypeScript + Vite |
 | Graph Database | Memgraph (source of truth) |
 | Local Cache | SQLite (embedded, synced from graph) |
-| MCP Server | TypeScript (packages/mcp-server) |
+| CLI/SDK | Python (packages/ijoka-cli) - `ijoka` command |
+| REST API | FastAPI on port 8000 |
 | Plugin | Claude Code hooks/commands/skills |
 
 ## Development Commands
@@ -102,21 +103,34 @@ cd packages/claude-plugin && claude /plugin install .
 │         │                   │                   │                │
 │         ▼                   ▼                   ▼                │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐       │
-│  │ SQLite       │    │  Tauri UI    │    │    MCP       │       │
-│  │ (local cache)│    │  (reads DB)  │    │   Server     │       │
+│  │ SQLite       │    │  Tauri UI    │    │  ijoka CLI   │       │
+│  │ (local cache)│    │  (reads DB)  │    │  & REST API  │       │
 │  └──────────────┘    └──────────────┘    └──────────────┘       │
 │                                                                  │
 │  ⚠️ feature_list.json is DEPRECATED - do not use               │
+│  ⚠️ MCP Server is DEPRECATED - use CLI/API instead             │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Feature Management via MCP Tools:**
-- `ijoka_status` - Get current project status and active feature
-- `ijoka_start_feature` - Start working on a feature
-- `ijoka_complete_feature` - Mark feature as complete
-- `ijoka_block_feature` - Mark feature as blocked
-- `ijoka_create_feature` - Create a new feature
-- `ijoka_record_insight` - Record a reusable insight
+**Feature Management via CLI:**
+```bash
+ijoka status                    # Get current project status and active feature
+ijoka feature list              # List all features
+ijoka feature start [ID]        # Start working on a feature
+ijoka feature complete          # Mark current feature as complete
+ijoka feature block --reason    # Mark feature as blocked
+ijoka feature create            # Create a new feature
+ijoka insight record            # Record a reusable insight
+ijoka analytics digest          # Get daily insights digest
+ijoka analytics ask "question"  # Natural language analytics query
+```
+
+**REST API (http://localhost:8000):**
+- `GET /status` - Project status
+- `GET /features` - List features
+- `POST /features/{id}/start` - Start feature
+- `POST /features/{id}/complete` - Complete feature
+- `POST /analytics/query` - Natural language query
 
 **Validation:**
 ```bash
@@ -185,9 +199,14 @@ The scaffold is complete. Development priorities:
 
 1. Ensure Memgraph is running: `docker compose up -d`
 2. Run `pnpm dev` to start the app
-3. Use `ijoka_status` MCP tool to see current feature
+3. Run `ijoka status` to see current feature and progress
 4. Work on the active feature
-5. Use `ijoka_complete_feature` when done
+5. Run `ijoka feature complete` when done
+
+**Optionally start the API server:**
+```bash
+ijoka-server  # Starts REST API on port 8000
+```
 
 ## Infrastructure
 

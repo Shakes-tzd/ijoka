@@ -2,6 +2,17 @@
 /**
  * Ijoka MCP Server
  *
+ * @deprecated This MCP server is DEPRECATED. Use the Ijoka CLI or REST API instead.
+ *
+ * MIGRATION GUIDE:
+ * - CLI: `ijoka status`, `ijoka feature list`, `ijoka feature start <ID>`, etc.
+ * - REST API: Start with `ijoka-server`, then use http://localhost:8000
+ *
+ * The CLI and REST API provide the same functionality with better validation,
+ * audit trails, and work across all AI clients.
+ *
+ * ---
+ *
  * Model Context Protocol server for AI agent integration.
  * Provides tools for agents to read/write project state.
  *
@@ -101,6 +112,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // Main entry point
 async function main() {
+  console.error('[ijoka-mcp] ⚠️  DEPRECATION WARNING: This MCP server is deprecated.');
+  console.error('[ijoka-mcp] Please migrate to the Ijoka CLI or REST API:');
+  console.error('[ijoka-mcp]   - CLI: ijoka status, ijoka feature list, etc.');
+  console.error('[ijoka-mcp]   - API: ijoka-server (http://localhost:8000)');
+  console.error('[ijoka-mcp]');
   console.error('[ijoka-mcp] Starting Ijoka MCP Server...');
 
   const config = await loadConfig();

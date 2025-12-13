@@ -12,6 +12,8 @@ Add a new feature to the Ijoka graph database.
 
 ## Instructions
 
+⚠️ **Note:** MCP server is deprecated. Use CLI commands when MCP tools are unavailable.
+
 When this command is invoked:
 
 1. **Parse the arguments** from: $ARGUMENTS
@@ -22,16 +24,20 @@ When this command is invoked:
    - functional, ui, security, performance, documentation
    - testing, infrastructure, refactoring, planning, meta
 
-3. **Check for duplicates** - Call `ijoka_status` and check if a similar feature exists
+3. **Check for duplicates** - Use `ijoka_status` MCP tool OR `ijoka status` CLI
    - Use fuzzy matching on descriptions
    - If duplicate found, ask user to confirm or modify
 
-4. **Create the feature** - Call `ijoka_create_feature`:
-   ```
+4. **Create the feature** - Use `ijoka_create_feature` MCP tool OR CLI:
+   ```bash
+   # MCP tool
    ijoka_create_feature:
      description: "<description>"
      category: "<category>"
      priority: 50  # Default priority, can be specified
+
+   # OR CLI
+   ijoka feature create --category "<category>" --priority 50 "<description>"
    ```
 
 5. **Confirm creation** - Show:

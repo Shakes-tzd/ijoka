@@ -19,6 +19,8 @@ Uses a cost-efficient Haiku agent to:
 
 ## Instructions
 
+⚠️ **Note:** MCP server is deprecated. Use CLI commands when MCP tools are unavailable.
+
 Use the Task tool to spawn a Haiku agent:
 
 ```
@@ -28,13 +30,13 @@ Task tool parameters:
 - prompt: |
     You are a feature classifier for the Ijoka observability system.
 
-    IMPORTANT: Use ONLY ijoka_* MCP tools for all operations. Never call Python scripts directly.
+    IMPORTANT: Use ijoka CLI commands OR MCP tools for all operations. Never call Python scripts directly.
 
     Your task:
-    1. Call `ijoka_status` to get all features for this project
-    2. Query for recent unlinked events using MCP tools:
-       - Use `ijoka_status` with include_unlinked_events: true (if supported)
-       - Or use available MCP query tools
+    1. Get all features: `ijoka status` CLI OR `ijoka_status` MCP
+    2. Query for recent unlinked events:
+       - `ijoka status --unlinked` CLI (if supported)
+       - Or use available MCP/CLI query tools
     3. For each unlinked event, analyze:
        - tool_name: What tool was used (Edit, Write, Bash, etc.)
        - payload: File paths, commands, patterns

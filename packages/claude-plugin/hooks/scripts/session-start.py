@@ -11,7 +11,7 @@ Runs quick diagnostics to catch configuration issues early.
 
 Architecture:
 - Memgraph = Single source of truth
-- MCP tools = Feature management interface
+- ijoka CLI/API = Feature management interface (MCP is DEPRECATED)
 - feature_list.json = DEPRECATED (no longer used)
 """
 
@@ -27,46 +27,67 @@ sys.path.insert(0, str(Path(__file__).parent))
 import graph_db_helper as db_helper
 from git_utils import resolve_project_path
 
-# MCP-first enforcement notice - included in all session contexts
+# CLI/API enforcement notice - included in all session contexts
 # CRITICAL: This must appear FIRST in context to ensure Claude sees it before taking action
-MCP_ENFORCEMENT = """## ⚠️ CRITICAL: MCP Tools Required - Read This First
+CLI_API_ENFORCEMENT = """## ⚠️ CRITICAL: Use Ijoka CLI/API - Read This First
 
-**VERIFY:** Do you have `ijoka_status` in your available tools?
-- If YES → Use MCP tools exclusively (instructions below)
-- If NO → Ask user: "MCP server doesn't appear to be connected. Please check the connection."
+### FIRST ACTION: Run `ijoka status`
 
----
+Before doing ANYTHING else, run the ijoka CLI to get project state:
 
-### FIRST ACTION: Call `ijoka_status`
+```bash
+ijoka status
+```
 
-Before doing ANYTHING else - before reading files, querying databases, or running scripts - call the `ijoka_status` MCP tool. This is the ONLY authorized way to get project state.
-
----
-
-### Available MCP Tools
-
-| Tool | Purpose |
-|------|---------|
-| `ijoka_status` | **START HERE** - Get project status and active features |
-| `ijoka_start_feature` | Begin working on a feature |
-| `ijoka_complete_feature` | Mark feature as complete |
-| `ijoka_create_feature` | Create new features |
-| `ijoka_set_plan` / `ijoka_get_plan` | Plan management |
-| `ijoka_checkpoint` | Report progress |
-| `ijoka_record_insight` / `ijoka_get_insights` | Learning capture |
+Or use the REST API: `GET http://localhost:8000/status`
 
 ---
 
-### Why MCP-First?
+### Available CLI Commands
 
-**NEVER bypass MCP** by calling Python scripts, database queries, or internal APIs directly.
+| Command | Purpose |
+|---------|---------|
+| `ijoka status` | **START HERE** - Get project status and active features |
+| `ijoka feature list` | List all features with their status |
+| `ijoka feature start [ID]` | Begin working on a feature |
+| `ijoka feature complete` | Mark current feature as complete |
+| `ijoka feature create` | Create a new feature |
+| `ijoka plan set` / `ijoka plan show` | Plan management |
+| `ijoka checkpoint` | Report progress |
+| `ijoka insight record` / `ijoka insight list` | Learning capture |
+| `ijoka analytics digest` | Get daily insights digest |
+| `ijoka analytics ask "question"` | Natural language analytics query |
 
-1. **Validation** - MCP tools validate inputs and handle errors gracefully
+Add `--json` to any command for JSON output.
+
+---
+
+### REST API Endpoints (http://localhost:8000)
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/status` | Project status |
+| GET | `/features` | List features |
+| POST | `/features` | Create feature |
+| POST | `/features/{id}/start` | Start feature |
+| POST | `/features/{id}/complete` | Complete feature |
+| GET/POST | `/plan` | Plan management |
+| POST | `/checkpoint` | Report progress |
+| GET | `/analytics/digest` | Daily digest |
+| POST | `/analytics/query` | Natural language query |
+
+---
+
+### Why CLI/API?
+
+**NEVER bypass the CLI/API** by calling Python scripts or database queries directly.
+
+1. **Validation** - CLI/API validates inputs and handles errors gracefully
 2. **Audit Trail** - All operations are logged for debugging and analysis
-3. **Client Agnostic** - Works across Claude Code, Codex, Gemini, and other AI clients
-4. **Abstraction** - Database implementation can change without breaking agents
+3. **DRY Architecture** - Single source of truth via IjokaClient
+4. **Analytics** - Full analytics and insights system available
 
-The hook that injected this context queried the database directly for convenience, but YOU must use MCP tools for all operations."""
+⚠️ **MCP Server is DEPRECATED** - Use CLI or REST API instead."""
 
 
 def get_head_commit(project_dir: str) -> Optional[str]:
@@ -288,7 +309,7 @@ def get_planning_context_summary(project_dir: str) -> Optional[str]:
                 lines.append(f"- [{cat}] {desc}")
 
         lines.append("")
-        lines.append("*Use `ijoka_get_insights` for detailed context or create new planning features as needed.*")
+        lines.append("*Use `ijoka insight list` for detailed context or create new planning features as needed.*")
 
         return "\n".join(lines)
 
@@ -354,7 +375,7 @@ def main():
     features = db_helper.get_features(project_dir)
 
     if not features:
-        output_response("No features found in graph database. Use ijoka_create_feature MCP tool or import from ijoka-implementation-plan.yaml.")
+        output_response("No features found in graph database. Use `ijoka feature create` CLI command or import from ijoka-implementation-plan.yaml.")
         return
 
     # Calculate stats
@@ -384,8 +405,8 @@ def main():
         # Build rich context with previous session, step progress, and commits
         context_parts = []
 
-        # MCP enforcement FIRST - Claude must see this before anything else
-        context_parts.append(MCP_ENFORCEMENT)
+        # CLI/API enforcement FIRST - Claude must see this before anything else
+        context_parts.append(CLI_API_ENFORCEMENT)
 
         # Add previous session summary if available (what was done)
         prev_session = get_previous_session_summary(session_id, project_dir)
@@ -442,7 +463,7 @@ After completing the current feature, these are queued:
         if diagnostic_section:
             context_parts.append(diagnostic_section)
 
-        # MCP enforcement already added FIRST (see above)
+        # CLI/API enforcement already added FIRST (see above)
 
         context = "\n\n---\n\n".join(context_parts)
 
@@ -473,8 +494,8 @@ After completing the current feature, these are queued:
         prev_session = get_previous_session_summary(session_id, project_dir)
         prev_section = f"\n\n---\n\n{prev_session}" if prev_session else ""
 
-        # MCP enforcement FIRST - Claude must see this before anything else
-        context = f"""{MCP_ENFORCEMENT}
+        # CLI/API enforcement FIRST - Claude must see this before anything else
+        context = f"""{CLI_API_ENFORCEMENT}
 
 ---
 
