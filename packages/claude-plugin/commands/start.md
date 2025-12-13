@@ -25,28 +25,40 @@ When the user runs `/ijoka:start`, you MUST:
 
 ---
 
-### ⚠️ CRITICAL: FIRST ACTION
+### ⚠️ CRITICAL: API-First for Agents
+
+**Interface Hierarchy:**
+| Interface | Audience | When to Use |
+|-----------|----------|-------------|
+| **REST API** | AI Agents | Primary - `curl http://localhost:8000/...` |
+| **CLI** | Humans | Interactive terminal - `ijoka status` |
+
+---
+
+### FIRST ACTION: Call the REST API
 
 **BEFORE doing anything else** - before reading files, running queries, or exploring the codebase:
 
 ```bash
-ijoka status
-ijoka plan show  # if there's an active feature
+# Get status (primary)
+curl -s http://localhost:8000/status
+
+# Get plan if active feature
+curl -s http://localhost:8000/plan
 ```
 
-**DO NOT** query databases directly or run Python scripts - use the CLI.
+**DO NOT** query databases directly or run Python scripts - use the API.
 
 ---
 
 ### 1. Get Current Status
-Use `ijoka status` to get:
+Call `GET http://localhost:8000/status` to get:
 - Current project info
 - Active feature (if any)
 - Overall progress statistics
-- Active session info
 
 ### 2. Get Plan Progress (if active feature)
-Use `ijoka plan show` to see:
+Call `GET http://localhost:8000/plan` to see:
 - Step completion status
 - Current step being worked on
 

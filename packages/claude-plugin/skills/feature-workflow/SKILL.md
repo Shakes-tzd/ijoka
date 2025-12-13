@@ -14,7 +14,12 @@ Activate this skill when:
 
 Ijoka uses **Memgraph** (graph database) as the single source of truth for features, sessions, and activity. This solves the core challenge of long-running agents: maintaining context across multiple sessions.
 
-**Interface:** Use the `ijoka` CLI or REST API (port 8000) for all operations.
+**Interface Hierarchy:**
+| Interface | Audience | When to Use |
+|-----------|----------|-------------|
+| **REST API** | AI Agents | Primary - `curl http://localhost:8000/...` |
+| **CLI** | Humans | Interactive terminal - `ijoka status` |
+| **Direct DB** | Hooks only | Internal use - context injection |
 
 ### Data Architecture
 
@@ -70,25 +75,25 @@ This means:
 
 ### At Session Start
 
-1. Run `/ijoka:start` or `ijoka status`
+1. Run `/ijoka:start` or call `GET http://localhost:8000/status`
 2. Check overall progress (X/Y complete)
 3. Identify the active feature (status: in_progress)
-4. Review the plan if one exists (`ijoka plan show`)
+4. Review the plan if one exists (`GET http://localhost:8000/plan`)
 
 ### BEFORE Any Work (CRITICAL)
 
 Before implementing anything, you MUST:
 
 1. **Analyze the user's request** - What are they asking for?
-2. **Check features via `ijoka status`** - Does this relate to an existing feature?
+2. **Check features via API** - `GET http://localhost:8000/status` - Does this relate to an existing feature?
 3. **Match to a feature** - Find the most relevant feature by:
    - Keywords in descriptions
    - Category match
    - Related functionality
 4. **Handle completed features** - If work relates to a completed feature:
-   - **Option A**: Reopen it (`ijoka feature start <ID>`)
-   - **Option B**: Create a follow-up feature (`ijoka feature create`)
-5. **Set the active feature** - Run `ijoka feature start <ID>` on the correct feature
+   - **Option A**: Reopen it (`POST /features/{id}/start`)
+   - **Option B**: Create a follow-up feature (`POST /features`)
+5. **Set the active feature** - `POST http://localhost:8000/features/{id}/start`
 
 ### Working on Completed Features
 
@@ -98,26 +103,26 @@ If a user asks to fix/enhance something related to a completed feature:
 User: "Fix the login form validation"
 
 Claude:
-1. Runs `ijoka status`... "User authentication" is marked complete
+1. Calls `curl http://localhost:8000/status`... "User authentication" is marked complete
 2. This relates to that feature
 3. Ask user:
    "This relates to 'User authentication' which is complete.
    Should I:
    A) Reopen it for this fix
    B) Create a new bug-fix feature"
-4. Run `ijoka feature start <ID>` accordingly
+4. Calls `POST /features/{id}/start` accordingly
 5. Proceed with the fix (now properly tracked)
 ```
 
 ### During Session
 
 1. Ensure correct feature has status: in_progress
-2. Optionally set a plan with `ijoka plan set`
+2. Optionally set a plan with `POST http://localhost:8000/plan`
 3. Implement the feature thoroughly
-4. Use `ijoka checkpoint` to report progress
+4. Use `POST http://localhost:8000/checkpoint` to report progress
 5. Test using the verification steps
 6. When complete:
-   - Run `ijoka feature complete`
+   - Call `POST http://localhost:8000/features/{id}/complete`
 7. Commit the code changes
 
 ### Critical Rules
@@ -132,37 +137,51 @@ Claude:
 6. **Leave code in working state** at session end
 7. **Commit frequently** - Use `ijoka checkpoint` to track progress
 
-## CLI Commands (REQUIRED Interface)
+## REST API (REQUIRED Interface for Agents)
 
-**CRITICAL: ALWAYS use `ijoka` CLI commands for ALL Ijoka operations.**
+**CRITICAL: AI agents MUST use the REST API for ALL Ijoka operations.**
 
-Never bypass the CLI by:
+Never bypass the API by:
 - Calling Python scripts directly (e.g., `uv run graph_db_helper.py`)
 - Running database queries directly
-- Using internal APIs
+- Using internal functions
 
-The CLI provides validation, audit trails, and a consistent interface.
+The API provides validation, audit trails, and works across all AI clients.
 
-| Command | Purpose |
-|---------|---------|
-| `ijoka status` | Get project status, active features, progress |
-| `ijoka feature list` | List all features with status |
-| `ijoka feature start [ID]` | Start working on a feature |
-| `ijoka feature complete` | Mark feature as complete |
-| `ijoka feature block --reason` | Report a blocker |
-| `ijoka feature create` | Create a new feature |
-| `ijoka plan set` | Declare implementation steps |
-| `ijoka plan show` | Get current plan status |
-| `ijoka checkpoint` | Report progress, get feedback |
-| `ijoka insight record` | Save a reusable learning |
-| `ijoka insight list` | Retrieve relevant insights |
-| `ijoka analytics digest` | Get daily insights digest |
-| `ijoka analytics ask` | Natural language query |
+### API Endpoints (http://localhost:8000)
 
-Add `--json` to any command for JSON output (useful for parsing).
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/status` | **START HERE** - Project status, active feature |
+| GET | `/features` | List all features |
+| GET | `/features/{id}` | Get specific feature |
+| POST | `/features` | Create feature |
+| POST | `/features/{id}/start` | Start working on a feature |
+| POST | `/features/{id}/complete` | Mark feature complete |
+| POST | `/features/next/start` | Start next pending feature |
+| GET | `/plan` | Get plan for active feature |
+| POST | `/plan` | Set plan for active feature |
+| POST | `/checkpoint` | Report progress |
+| GET | `/insights` | List insights |
+| POST | `/insights` | Record insight |
+| GET | `/analytics/digest` | Daily digest |
+| POST | `/analytics/query` | Natural language query |
 
-**REST API Alternative (http://localhost:8000):**
-Start with `ijoka-server`, then use standard HTTP requests.
+### Example Agent Workflow
+
+```bash
+# 1. Get status
+curl -s http://localhost:8000/status
+
+# 2. Start feature
+curl -s -X POST http://localhost:8000/features/{id}/start
+
+# 3. Complete feature
+curl -s -X POST http://localhost:8000/features/{id}/complete
+```
+
+**CLI Alternative (for humans):**
+Use `ijoka status` for pretty-formatted terminal output.
 
 
 ## Commands Available
@@ -180,16 +199,16 @@ Start with `ijoka-server`, then use standard HTTP requests.
 
 ```
 Session Start:
-→ Run /ijoka:start or `ijoka status`
+→ Run /ijoka:start or `curl http://localhost:8000/status`
 → "Progress: 5/12 features complete (42%)"
 → "Active: [security] Input validation"
 → "Plan: 2/4 steps complete"
 
 Working:
-→ Claude continues with "Input validation" feature
-→ Runs `ijoka checkpoint` after each step
+→ Agent continues with "Input validation" feature
+→ Calls `POST /checkpoint` after each step
 → Tests validation thoroughly
-→ Runs `ijoka feature complete`
+→ Calls `POST /features/{id}/complete`
 → Commits code
 
 Session End:

@@ -27,38 +27,29 @@ sys.path.insert(0, str(Path(__file__).parent))
 import graph_db_helper as db_helper
 from git_utils import resolve_project_path
 
-# CLI/API enforcement notice - included in all session contexts
-# CRITICAL: This must appear FIRST in context to ensure Claude sees it before taking action
-CLI_API_ENFORCEMENT = """## ⚠️ CRITICAL: Use Ijoka CLI/API - Read This First
+# API-first enforcement notice - included in all session contexts
+# CRITICAL: This must appear FIRST in context to ensure agent sees it before taking action
+API_FIRST_ENFORCEMENT = """## ⚠️ CRITICAL: API-First for Agents
 
-### FIRST ACTION: Run `ijoka status`
+### Interface Hierarchy
 
-Before doing ANYTHING else, run the ijoka CLI to get project state:
-
-```bash
-ijoka status
-```
-
-Or use the REST API: `GET http://localhost:8000/status`
+| Interface | Audience | When to Use |
+|-----------|----------|-------------|
+| **REST API** | AI Agents | Primary interface - `curl http://localhost:8000/...` |
+| **CLI** | Humans | Interactive terminal use - `ijoka status` |
+| **Direct DB** | Hooks only | Internal use - SessionStart context injection |
 
 ---
 
-### Available CLI Commands
+### FIRST ACTION: Call the REST API
 
-| Command | Purpose |
-|---------|---------|
-| `ijoka status` | **START HERE** - Get project status and active features |
-| `ijoka feature list` | List all features with their status |
-| `ijoka feature start [ID]` | Begin working on a feature |
-| `ijoka feature complete` | Mark current feature as complete |
-| `ijoka feature create` | Create a new feature |
-| `ijoka plan set` / `ijoka plan show` | Plan management |
-| `ijoka checkpoint` | Report progress |
-| `ijoka insight record` / `ijoka insight list` | Learning capture |
-| `ijoka analytics digest` | Get daily insights digest |
-| `ijoka analytics ask "question"` | Natural language analytics query |
+Before doing ANYTHING else, call the API to get project state:
 
-Add `--json` to any command for JSON output.
+```bash
+curl -s http://localhost:8000/status
+```
+
+This returns JSON - perfect for agent consumption. No PATH issues, no directory requirements.
 
 ---
 
@@ -66,28 +57,59 @@ Add `--json` to any command for JSON output.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| GET | `/status` | Project status |
-| GET | `/features` | List features |
+| GET | `/status` | **START HERE** - Project status, active feature, progress |
+| GET | `/features` | List all features |
+| GET | `/features/{id}` | Get specific feature |
 | POST | `/features` | Create feature |
-| POST | `/features/{id}/start` | Start feature |
-| POST | `/features/{id}/complete` | Complete feature |
-| GET/POST | `/plan` | Plan management |
+| POST | `/features/{id}/start` | Start working on a feature |
+| POST | `/features/{id}/complete` | Mark feature complete |
+| POST | `/features/next/start` | Start next pending feature |
+| GET | `/plan` | Get plan for active feature |
+| POST | `/plan` | Set plan for active feature |
 | POST | `/checkpoint` | Report progress |
-| GET | `/analytics/digest` | Daily digest |
+| GET | `/insights` | List insights |
+| POST | `/insights` | Record insight |
+| GET | `/analytics/digest` | Daily insights digest |
 | POST | `/analytics/query` | Natural language query |
 
 ---
 
-### Why CLI/API?
+### Example Agent Workflow
 
-**NEVER bypass the CLI/API** by calling Python scripts or database queries directly.
+```bash
+# 1. Get current status
+curl -s http://localhost:8000/status | jq
 
-1. **Validation** - CLI/API validates inputs and handles errors gracefully
-2. **Audit Trail** - All operations are logged for debugging and analysis
-3. **DRY Architecture** - Single source of truth via IjokaClient
-4. **Analytics** - Full analytics and insights system available
+# 2. Start a feature
+curl -s -X POST http://localhost:8000/features/{id}/start
 
-The CLI provides the same operations as the Python scripts but with proper validation and error handling."""
+# 3. Set a plan
+curl -s -X POST http://localhost:8000/plan \\
+  -H "Content-Type: application/json" \\
+  -d '{"steps": ["Step 1", "Step 2"]}'
+
+# 4. Report checkpoint
+curl -s -X POST http://localhost:8000/checkpoint \\
+  -H "Content-Type: application/json" \\
+  -d '{"step_completed": "Step 1"}'
+
+# 5. Complete feature
+curl -s -X POST http://localhost:8000/features/{id}/complete
+```
+
+---
+
+### Why API-First?
+
+**NEVER bypass the API** by calling Python scripts or database queries directly.
+
+1. **Reliable** - Always available at `http://localhost:8000`, no PATH/directory issues
+2. **JSON** - Structured responses perfect for agent parsing
+3. **Validation** - API validates inputs and handles errors gracefully
+4. **Audit Trail** - All operations logged for debugging
+5. **Client Agnostic** - Works across Claude Code, Codex, Gemini, any HTTP client
+
+**CLI Alternative:** For human interactive use, `ijoka status` provides pretty-formatted output."""
 
 
 def get_head_commit(project_dir: str) -> Optional[str]:
@@ -405,8 +427,8 @@ def main():
         # Build rich context with previous session, step progress, and commits
         context_parts = []
 
-        # CLI/API enforcement FIRST - Claude must see this before anything else
-        context_parts.append(CLI_API_ENFORCEMENT)
+        # API-first enforcement FIRST - agent must see this before anything else
+        context_parts.append(API_FIRST_ENFORCEMENT)
 
         # Add previous session summary if available (what was done)
         prev_session = get_previous_session_summary(session_id, project_dir)
@@ -494,8 +516,8 @@ After completing the current feature, these are queued:
         prev_session = get_previous_session_summary(session_id, project_dir)
         prev_section = f"\n\n---\n\n{prev_session}" if prev_session else ""
 
-        # CLI/API enforcement FIRST - Claude must see this before anything else
-        context = f"""{CLI_API_ENFORCEMENT}
+        # API-first enforcement FIRST - agent must see this before anything else
+        context = f"""{API_FIRST_ENFORCEMENT}
 
 ---
 
