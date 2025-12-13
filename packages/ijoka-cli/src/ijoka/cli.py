@@ -1543,6 +1543,67 @@ def transcript_entries(
         console.print()
 
 
+@transcript_app.command("summarize")
+def transcript_summarize(
+    session_id: Annotated[str, typer.Argument(help="Session ID to summarize")],
+    model: Annotated[str, typer.Option("--model", "-m", help="Claude model to use")] = "haiku",
+    json_output: Annotated[bool, typer.Option("--json", "-j", help="Output as JSON")] = False,
+):
+    """Generate a summary for a transcript session using Claude CLI headless mode."""
+    from .summarizer import generate_session_summary, check_claude_cli_available
+
+    if not check_claude_cli_available():
+        console.print("[red]Error:[/red] Claude CLI not found. Is Claude Code installed?")
+        raise typer.Exit(1)
+
+    console.print(f"[dim]Generating summary using {model}...[/dim]")
+
+    try:
+        summary = generate_session_summary(session_id, model=model)
+
+        if json_output:
+            output_json(summary.model_dump())
+            return
+
+        if "Failed" in summary.title or "Error" in summary.summary:
+            console.print(f"[red]Error:[/red] {summary.summary}")
+            raise typer.Exit(1)
+
+        console.print()
+        console.print(Panel(
+            f"[bold]{summary.title}[/bold]\n\n"
+            f"{summary.summary}",
+            title=f"Session Summary ({session_id[:12]}...)",
+            border_style="green",
+        ))
+
+        if summary.key_actions:
+            console.print()
+            console.print("[bold]Key Actions:[/bold]")
+            for action in summary.key_actions:
+                console.print(f"  • {action}")
+
+        if summary.files_modified:
+            console.print()
+            console.print("[bold]Files Modified:[/bold]")
+            for f in summary.files_modified:
+                console.print(f"  • {f}")
+
+        if summary.decisions_made:
+            console.print()
+            console.print("[bold]Decisions Made:[/bold]")
+            for d in summary.decisions_made:
+                console.print(f"  • {d}")
+
+        if summary.tools_highlighted:
+            console.print()
+            console.print(f"[dim]Tools: {', '.join(summary.tools_highlighted)}[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]Error generating summary:[/red] {e}")
+        raise typer.Exit(1)
+
+
 # =============================================================================
 # HELP COMMAND
 # =============================================================================

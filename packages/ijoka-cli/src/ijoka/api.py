@@ -1033,6 +1033,69 @@ async def get_session_tool_uses(
     return {"success": True, "session_id": session_id, "tool_uses": tools, "count": len(tools)}
 
 
+class SummarizeRequest(BaseModel):
+    """Request to generate a session summary."""
+    model: str = Field(default="haiku", description="Claude model to use")
+
+
+class SessionSummaryResponse(BaseModel):
+    """Response for session summary."""
+    success: bool = True
+    session_id: str
+    title: str
+    summary: str
+    key_actions: list[str]
+    tools_highlighted: list[str]
+    files_modified: list[str] = Field(default_factory=list)
+    decisions_made: list[str] = Field(default_factory=list)
+    model: str
+
+
+@app.post("/transcripts/sessions/{session_id}/summarize", response_model=SessionSummaryResponse, tags=["Transcripts"])
+async def summarize_session(
+    session_id: str = Path(..., description="Session ID to summarize"),
+    request: Optional[SummarizeRequest] = None,
+):
+    """
+    Generate a summary for a transcript session using Claude CLI headless mode.
+
+    Uses the same authentication as the user's Claude Code installation.
+    Default model is Haiku for cost efficiency.
+    """
+    from .summarizer import generate_session_summary, check_claude_cli_available
+
+    if not check_claude_cli_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Claude CLI not found. Is Claude Code installed?"
+        )
+
+    db = _get_graph_helper()
+    if not db.is_connected():
+        raise HTTPException(status_code=503, detail="Memgraph not connected")
+
+    model = request.model if request else "haiku"
+
+    try:
+        summary = generate_session_summary(session_id, model=model)
+
+        if "Failed" in summary.title or "Error" in summary.summary:
+            raise HTTPException(status_code=500, detail=summary.summary)
+
+        return SessionSummaryResponse(
+            session_id=session_id,
+            title=summary.title,
+            summary=summary.summary,
+            key_actions=summary.key_actions,
+            tools_highlighted=summary.tools_highlighted,
+            files_modified=summary.files_modified,
+            decisions_made=summary.decisions_made,
+            model=summary.model,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # =============================================================================
 # SERVER ENTRY POINT
 # =============================================================================
