@@ -18,21 +18,28 @@ Usage:
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
+from .analytics import AgentProfiler, InsightSynthesizer, PatternDetector, TemporalAnalyzer
 from .db import IjokaClient
 from .models import (
+    AgentProfileResponse,
+    AnalyticsQueryResponse,
+    DailyDigestResponse,
     Feature,
     FeatureCategory,
     FeatureListItem,
     FeatureStatus,
     Insight,
     InsightType,
+    PatternAnalysisResponse,
     Project,
     ProjectStats,
     Step,
+    VelocityResponse,
 )
+from .query_engine import AgenticQueryEngine
 
 
 # =============================================================================
@@ -112,6 +119,11 @@ class MessageResponse(BaseModel):
     """Generic message response."""
     success: bool = True
     message: str
+
+
+class AnalyticsQueryRequest(BaseModel):
+    """Request for natural language analytics query."""
+    question: str = Field(..., min_length=1, description="Natural language question")
 
 
 class SetPlanRequest(BaseModel):
@@ -685,6 +697,132 @@ async def record_insight(request: RecordInsightRequest):
         insight=insight,
         message=f"Recorded insight: {insight.description[:50]}...",
     )
+
+
+# =============================================================================
+# ANALYTICS ENDPOINTS
+# =============================================================================
+
+
+@app.get("/analytics/patterns", response_model=PatternAnalysisResponse, tags=["Analytics"])
+async def get_patterns():
+    """Get discovered patterns and feature clusters."""
+    client = get_client()
+    detector = PatternDetector(client)
+
+    return PatternAnalysisResponse(
+        clusters=detector.detect_feature_clusters(),
+        patterns=detector.find_common_workflows(min_frequency=1),
+        bottlenecks=detector.detect_bottlenecks()
+    )
+
+
+@app.get("/analytics/velocity", response_model=VelocityResponse, tags=["Analytics"])
+async def get_velocity(days: int = Query(7, ge=1, le=365, description="Time window in days")):
+    """Get productivity velocity metrics."""
+    client = get_client()
+    analyzer = TemporalAnalyzer(client)
+
+    current = analyzer.compute_velocity(window_days=days)
+    drift_warnings = analyzer.detect_velocity_drift()
+
+    return VelocityResponse(
+        current=current,
+        drift_warnings=drift_warnings
+    )
+
+
+@app.get("/analytics/profile/{agent}", response_model=AgentProfileResponse, tags=["Analytics"])
+async def get_agent_profile(agent: str = Path(..., description="Agent identifier")):
+    """Get behavioral profile for an agent."""
+    client = get_client()
+    profiler = AgentProfiler(client)
+
+    profile = profiler.build_profile(agent)
+
+    return AgentProfileResponse(profile=profile)
+
+
+@app.get("/analytics/agents", tags=["Analytics"])
+async def list_agents():
+    """List all agents that have worked on features."""
+    client = get_client()
+    profiler = AgentProfiler(client)
+
+    return {"agents": profiler.list_agents()}
+
+
+@app.post("/analytics/query", response_model=AnalyticsQueryResponse, tags=["Analytics"])
+async def query_analytics(request: AnalyticsQueryRequest):
+    """Execute a natural language analytics query."""
+    client = get_client()
+    engine = AgenticQueryEngine(client)
+
+    return engine.query(request.question)
+
+
+@app.get("/analytics/digest", response_model=DailyDigestResponse, tags=["Analytics"])
+async def get_daily_digest():
+    """Get daily digest of top insights."""
+    from datetime import datetime
+
+    client = get_client()
+    synthesizer = InsightSynthesizer(client)
+    detector = PatternDetector(client)
+    analyzer = TemporalAnalyzer(client)
+
+    return DailyDigestResponse(
+        date=datetime.now(),
+        top_insights=synthesizer.generate_daily_digest(max_insights=10),
+        velocity=analyzer.compute_velocity(),
+        active_bottlenecks=detector.detect_bottlenecks()
+    )
+
+
+@app.get("/analytics/summary", tags=["Analytics"])
+async def get_analytics_summary():
+    """Get comprehensive analytics summary."""
+    client = get_client()
+    synthesizer = InsightSynthesizer(client)
+
+    return synthesizer.get_summary()
+
+
+# Self-Improvement Loop Endpoints
+
+class InsightFeedbackRequest(BaseModel):
+    """Request for insight feedback."""
+    insight_id: str = Field(..., description="Insight identifier")
+    helpful: bool = Field(..., description="Whether the insight was helpful")
+    comment: Optional[str] = Field(None, description="Optional feedback comment")
+
+
+@app.post("/analytics/feedback", tags=["Analytics"])
+async def submit_insight_feedback(request: InsightFeedbackRequest):
+    """Submit feedback for an insight to improve future recommendations."""
+    from .analytics import SelfImprovementLoop
+
+    client = get_client()
+    loop = SelfImprovementLoop(client)
+
+    success = loop.record_feedback(request.insight_id, request.helpful, request.comment)
+
+    return {
+        "success": success,
+        "insight_id": request.insight_id,
+        "helpful": request.helpful,
+    }
+
+
+@app.get("/analytics/effectiveness", tags=["Analytics"])
+async def get_insight_effectiveness():
+    """Get insight effectiveness metrics based on user feedback."""
+    from .analytics import SelfImprovementLoop
+
+    client = get_client()
+    loop = SelfImprovementLoop(client)
+
+    return loop.get_feedback_summary()
 
 
 # =============================================================================

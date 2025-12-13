@@ -210,3 +210,145 @@ class ErrorResponse(BaseModel):
     success: bool = False
     error: str
     details: Optional[dict] = None
+
+
+# =============================================================================
+# ANALYTICS MODELS
+# =============================================================================
+
+
+class BottleneckSeverity(str, Enum):
+    """Severity levels for bottlenecks."""
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class VelocityTrend(str, Enum):
+    """Velocity trend direction."""
+    IMPROVING = "improving"
+    STABLE = "stable"
+    DECLINING = "declining"
+
+
+class FeatureCluster(BaseModel):
+    """Group of related features identified by pattern analysis."""
+    id: str
+    name: str
+    feature_ids: list[str] = Field(default_factory=list)
+    common_category: Optional[FeatureCategory] = None
+    avg_completion_time: Optional[float] = None  # hours
+    size: int = Field(default=0, ge=0)
+
+
+class WorkflowPattern(BaseModel):
+    """Recurring workflow sequence detected across features."""
+    id: str
+    sequence: list[str] = Field(default_factory=list)  # step types or tool names
+    frequency: int = Field(default=1, ge=1)
+    avg_duration: Optional[float] = None  # hours
+    success_rate: Optional[float] = Field(default=None, ge=0, le=1)
+
+
+class Bottleneck(BaseModel):
+    """Identified bottleneck in workflow."""
+    id: str
+    feature_id: str
+    description: Optional[str] = None
+    severity: BottleneckSeverity = BottleneckSeverity.MEDIUM
+    avg_block_duration: Optional[float] = None  # hours
+    occurrences: int = Field(default=1, ge=1)
+    block_reason: Optional[str] = None
+
+
+class AgentProfile(BaseModel):
+    """Behavioral profile for an AI agent."""
+    agent_id: str
+    total_features: int = Field(default=0, ge=0)
+    completed_features: int = Field(default=0, ge=0)
+    avg_completion_time: Optional[float] = None  # hours
+    preferred_categories: list[FeatureCategory] = Field(default_factory=list)
+    success_rate: Optional[float] = Field(default=None, ge=0, le=1)
+    common_tools: list[str] = Field(default_factory=list)
+    active_hours: Optional[dict[str, int]] = None  # hour -> count
+
+
+class VelocityMetrics(BaseModel):
+    """Productivity velocity over a time period."""
+    period_start: datetime
+    period_end: datetime
+    features_completed: int = Field(default=0, ge=0)
+    features_started: int = Field(default=0, ge=0)
+    avg_cycle_time: Optional[float] = None  # hours from start to complete
+    trend: VelocityTrend = VelocityTrend.STABLE
+    features_per_day: Optional[float] = None
+
+
+class AnalyticsInsightType(str, Enum):
+    """Types of analytics insights."""
+    PATTERN = "pattern"
+    BOTTLENECK = "bottleneck"
+    RECOMMENDATION = "recommendation"
+    ANOMALY = "anomaly"
+    TREND = "trend"
+
+
+class AnalyticsInsight(BaseModel):
+    """Generated insight from analytics processing."""
+    id: str
+    insight_type: AnalyticsInsightType
+    description: str
+    impact_score: float = Field(default=0.5, ge=0, le=1)
+    confidence: float = Field(default=0.5, ge=0, le=1)
+    related_features: list[str] = Field(default_factory=list)
+    actionable: bool = True
+    created_at: Optional[datetime] = None
+    # Feedback tracking for self-improvement
+    feedback_count: int = Field(default=0, ge=0)
+    helpful_count: int = Field(default=0, ge=0)
+
+
+# =============================================================================
+# ANALYTICS RESPONSE MODELS
+# =============================================================================
+
+
+class PatternAnalysisResponse(BaseModel):
+    """Response from pattern analysis."""
+    success: bool = True
+    clusters: list[FeatureCluster] = Field(default_factory=list)
+    patterns: list[WorkflowPattern] = Field(default_factory=list)
+    bottlenecks: list[Bottleneck] = Field(default_factory=list)
+
+
+class VelocityResponse(BaseModel):
+    """Response from velocity analysis."""
+    success: bool = True
+    current: VelocityMetrics
+    previous: Optional[VelocityMetrics] = None
+    drift_warnings: list[str] = Field(default_factory=list)
+
+
+class AgentProfileResponse(BaseModel):
+    """Response from agent profiling."""
+    success: bool = True
+    profile: AgentProfile
+    recommendations: list[str] = Field(default_factory=list)
+
+
+class AnalyticsQueryResponse(BaseModel):
+    """Response from natural language analytics query."""
+    success: bool = True
+    query_type: str
+    data: dict = Field(default_factory=dict)
+    insights: list[AnalyticsInsight] = Field(default_factory=list)
+
+
+class DailyDigestResponse(BaseModel):
+    """Response from daily digest generation."""
+    success: bool = True
+    date: datetime
+    top_insights: list[AnalyticsInsight] = Field(default_factory=list)
+    velocity: Optional[VelocityMetrics] = None
+    active_bottlenecks: list[Bottleneck] = Field(default_factory=list)

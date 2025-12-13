@@ -28,6 +28,8 @@ from .models import (
     PlanResponse,
     ProjectStats,
 )
+from .analytics import PatternDetector, TemporalAnalyzer, AgentProfiler, InsightSynthesizer, SelfImprovementLoop
+from .query_engine import AgenticQueryEngine
 
 # Configure loguru - only show warnings and above by default
 logger.remove()
@@ -49,11 +51,13 @@ feature_app = typer.Typer(help="Feature management commands")
 plan_app = typer.Typer(help="Plan management commands")
 insight_app = typer.Typer(help="Insight management commands")
 session_app = typer.Typer(help="Session management commands")
+analytics_app = typer.Typer(help="Analytics and insights commands")
 
 app.add_typer(feature_app, name="feature")
 app.add_typer(plan_app, name="plan")
 app.add_typer(insight_app, name="insight")
 app.add_typer(session_app, name="session")
+app.add_typer(analytics_app, name="analytics")
 
 
 # =============================================================================
@@ -708,6 +712,279 @@ def insight_list(
 
         console.print(table)
 
+    finally:
+        client.close()
+
+
+# =============================================================================
+# ANALYTICS COMMANDS
+# =============================================================================
+
+
+@analytics_app.command("patterns")
+def analytics_patterns(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Show discovered patterns and feature clusters."""
+    client = get_client_safe()
+
+    try:
+        detector = PatternDetector(client)
+
+        clusters = detector.detect_feature_clusters()
+        workflows = detector.find_common_workflows(min_frequency=1)
+        bottlenecks = detector.detect_bottlenecks()
+
+        if json_output:
+            from .models import PatternAnalysisResponse
+            response = PatternAnalysisResponse(
+                clusters=clusters,
+                patterns=workflows,
+                bottlenecks=bottlenecks
+            )
+            console.print_json(response.model_dump_json())
+        else:
+            console.print("[bold]Feature Clusters[/bold]")
+            if clusters:
+                for c in clusters:
+                    console.print(f"  • {c.name}: {c.size} features")
+            else:
+                console.print("  No clusters found")
+
+            console.print("\n[bold]Common Workflows[/bold]")
+            if workflows:
+                for w in workflows[:5]:
+                    steps = " → ".join(w.sequence[:3])
+                    if len(w.sequence) > 3:
+                        steps += "..."
+                    console.print(f"  • ({w.frequency}x) {steps}")
+            else:
+                console.print("  No common workflows found")
+
+            console.print("\n[bold]Bottlenecks[/bold]")
+            if bottlenecks:
+                for b in bottlenecks[:5]:
+                    severity_color = {"critical": "red", "high": "yellow", "medium": "blue", "low": "green"}.get(b.severity.value, "white")
+                    console.print(f"  • [{severity_color}]{b.severity.value.upper()}[/{severity_color}] {b.description[:50]}...")
+            else:
+                console.print("  No bottlenecks found")
+    finally:
+        client.close()
+
+
+@analytics_app.command("velocity")
+def analytics_velocity(
+    days: int = typer.Option(7, "--days", "-d", help="Time window in days"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Show productivity velocity metrics."""
+    client = get_client_safe()
+
+    try:
+        analyzer = TemporalAnalyzer(client)
+
+        velocity = analyzer.compute_velocity(window_days=days)
+        drift_warnings = analyzer.detect_velocity_drift()
+
+        if json_output:
+            from .models import VelocityResponse
+            response = VelocityResponse(current=velocity, drift_warnings=drift_warnings)
+            console.print_json(response.model_dump_json())
+        else:
+            console.print(f"[bold]Velocity ({days} days)[/bold]")
+            console.print(f"  Features completed: {velocity.features_completed}")
+            console.print(f"  Features started: {velocity.features_started}")
+            if velocity.features_per_day:
+                console.print(f"  Rate: {velocity.features_per_day:.2f} features/day")
+            if velocity.avg_cycle_time:
+                console.print(f"  Avg cycle time: {velocity.avg_cycle_time:.1f} hours")
+            console.print(f"  Trend: {velocity.trend.value}")
+
+            if drift_warnings:
+                console.print("\n[bold yellow]⚠ Warnings[/bold yellow]")
+                for warning in drift_warnings:
+                    console.print(f"  • {warning}")
+    finally:
+        client.close()
+
+
+@analytics_app.command("profile")
+def analytics_profile(
+    agent: str = typer.Option("claude-code", "--agent", "-a", help="Agent to profile"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Show agent behavior profile."""
+    client = get_client_safe()
+
+    try:
+        profiler = AgentProfiler(client)
+
+        profile = profiler.build_profile(agent)
+
+        if json_output:
+            from .models import AgentProfileResponse
+            response = AgentProfileResponse(profile=profile)
+            console.print_json(response.model_dump_json())
+        else:
+            console.print(f"[bold]Agent Profile: {agent}[/bold]")
+            console.print(f"  Total features: {profile.total_features}")
+            console.print(f"  Completed: {profile.completed_features}")
+            if profile.success_rate is not None:
+                console.print(f"  Success rate: {profile.success_rate:.0%}")
+            if profile.avg_completion_time:
+                console.print(f"  Avg completion time: {profile.avg_completion_time:.1f} hours")
+            if profile.preferred_categories:
+                cats = ", ".join(c.value for c in profile.preferred_categories[:3])
+                console.print(f"  Preferred categories: {cats}")
+    finally:
+        client.close()
+
+
+@analytics_app.command("ask")
+def analytics_ask(
+    question: str = typer.Argument(..., help="Natural language question"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Ask a natural language question about your data."""
+    client = get_client_safe()
+
+    try:
+        engine = AgenticQueryEngine(client)
+
+        response = engine.query(question)
+
+        if json_output:
+            console.print_json(response.model_dump_json())
+        else:
+            console.print(f"[bold]Query Type: {response.query_type}[/bold]\n")
+
+            if response.insights:
+                console.print("[bold]Insights:[/bold]")
+                for insight in response.insights[:5]:
+                    console.print(f"  • {insight.description}")
+
+            if response.data:
+                console.print("\n[bold]Data:[/bold]")
+                # Pretty print key metrics
+                if "metrics" in response.data:
+                    m = response.data["metrics"]
+                    console.print(f"  Completed: {m.get('features_completed', 0)} features")
+                if "count" in response.data:
+                    console.print(f"  Found: {response.data['count']} items")
+    finally:
+        client.close()
+
+
+@analytics_app.command("digest")
+def analytics_digest(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Show daily digest of top insights."""
+    client = get_client_safe()
+
+    try:
+        synthesizer = InsightSynthesizer(client)
+
+        insights = synthesizer.generate_daily_digest(max_insights=10)
+        recommendations = synthesizer.recommend_actions()
+
+        if json_output:
+            from datetime import datetime
+            from .models import DailyDigestResponse
+            velocity = TemporalAnalyzer(client).compute_velocity()
+            bottlenecks = PatternDetector(client).detect_bottlenecks()
+            response = DailyDigestResponse(
+                date=datetime.now(),
+                top_insights=insights,
+                velocity=velocity,
+                active_bottlenecks=bottlenecks
+            )
+            console.print_json(response.model_dump_json())
+        else:
+            console.print("[bold]📊 Daily Digest[/bold]\n")
+
+            if insights:
+                console.print("[bold]Top Insights:[/bold]")
+                for i, insight in enumerate(insights[:5], 1):
+                    icon = {"bottleneck": "🚧", "anomaly": "⚠️", "pattern": "📈", "trend": "📉", "recommendation": "💡"}.get(insight.insight_type.value, "•")
+                    console.print(f"  {icon} {insight.description}")
+            else:
+                console.print("  No insights available")
+
+            if recommendations:
+                console.print("\n[bold]Recommendations:[/bold]")
+                for rec in recommendations[:3]:
+                    console.print(f"  💡 {rec.description}")
+    finally:
+        client.close()
+
+
+@analytics_app.command("feedback")
+def analytics_feedback(
+    insight_id: str = typer.Argument(..., help="Insight ID to provide feedback for"),
+    helpful: bool = typer.Option(True, "--helpful/--not-helpful", help="Was the insight helpful?"),
+    comment: Optional[str] = typer.Option(None, "--comment", "-c", help="Optional feedback comment"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Provide feedback on an insight to improve future recommendations."""
+    client = get_client_safe()
+
+    try:
+        loop = SelfImprovementLoop(client)
+        success = loop.record_feedback(insight_id, helpful, comment)
+
+        if json_output:
+            console.print_json(json.dumps({
+                "success": success,
+                "insight_id": insight_id,
+                "helpful": helpful,
+                "comment": comment
+            }))
+        else:
+            if success:
+                emoji = "👍" if helpful else "👎"
+                console.print(f"{emoji} Feedback recorded for insight {insight_id[:8]}...")
+                if comment:
+                    console.print(f"   Comment: {comment}")
+            else:
+                console.print("[red]Failed to record feedback[/red]")
+    finally:
+        client.close()
+
+
+@analytics_app.command("effectiveness")
+def analytics_effectiveness(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Show insight effectiveness based on user feedback."""
+    client = get_client_safe()
+
+    try:
+        loop = SelfImprovementLoop(client)
+        summary = loop.get_feedback_summary()
+
+        if json_output:
+            console.print_json(json.dumps(summary))
+        else:
+            console.print("[bold]📈 Insight Effectiveness[/bold]\n")
+
+            if summary["total_feedback"]:
+                overall = summary["overall_effectiveness"]
+                console.print(f"  Total feedback: {summary['total_feedback']}")
+                console.print(f"  Overall effectiveness: {overall:.0%}" if overall else "  Overall effectiveness: N/A")
+
+                if summary["effectiveness_by_type"]:
+                    console.print("\n[bold]By Type:[/bold]")
+                    for itype, score in summary["effectiveness_by_type"].items():
+                        bar = "█" * int(score * 10) + "░" * (10 - int(score * 10))
+                        console.print(f"  {itype}: {bar} {score:.0%}")
+            else:
+                console.print("  No feedback recorded yet")
+
+            if summary["suggestions"]:
+                console.print("\n[bold]Suggestions:[/bold]")
+                for suggestion in summary["suggestions"]:
+                    console.print(f"  • {suggestion}")
     finally:
         client.close()
 
