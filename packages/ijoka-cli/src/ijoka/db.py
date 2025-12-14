@@ -560,6 +560,138 @@ class IjokaClient:
             return self._node_to_feature(record["f"])
 
     # =========================================================================
+    # HIERARCHY OPERATIONS
+    # =========================================================================
+
+    def get_children(self, feature_id: str) -> list[Feature]:
+        """Get immediate children of a feature."""
+        with self.session() as session:
+            result = session.run(
+                """
+                MATCH (child:Feature)-[:CHILD_OF]->(parent:Feature {id: $id})
+                RETURN child
+                ORDER BY child.priority DESC, child.created_at DESC
+                """,
+                id=feature_id,
+            )
+            return [self._node_to_feature(record["child"]) for record in result]
+
+    def get_descendants(self, feature_id: str) -> list[Feature]:
+        """Get all descendants (children, grandchildren, etc.) of a feature."""
+        with self.session() as session:
+            result = session.run(
+                """
+                MATCH (descendant:Feature)-[:CHILD_OF*]->(ancestor:Feature {id: $id})
+                RETURN descendant
+                ORDER BY descendant.priority DESC
+                """,
+                id=feature_id,
+            )
+            return [self._node_to_feature(record["descendant"]) for record in result]
+
+    def get_ancestors(self, feature_id: str) -> list[Feature]:
+        """Get all ancestors (parent, grandparent, etc.) of a feature."""
+        with self.session() as session:
+            result = session.run(
+                """
+                MATCH (child:Feature {id: $id})-[:CHILD_OF*]->(ancestor:Feature)
+                RETURN ancestor
+                """,
+                id=feature_id,
+            )
+            return [self._node_to_feature(record["ancestor"]) for record in result]
+
+    def get_hierarchy(self, feature_id: str) -> dict:
+        """
+        Get full hierarchy tree rooted at feature.
+        Returns dict with feature and nested children.
+        """
+        feature = self.get_feature(feature_id)
+        if not feature:
+            return {}
+
+        children = self.get_children(feature_id)
+
+        return {
+            "feature": feature,
+            "children": [self.get_hierarchy(child.id) for child in children],
+            "child_count": len(children),
+            "descendant_count": len(self.get_descendants(feature_id)),
+        }
+
+    def link_to_parent(self, feature_id: str, parent_id: str) -> Feature:
+        """Link feature to parent (creates CHILD_OF edge)."""
+        if feature_id == parent_id:
+            raise ValueError("Feature cannot be its own parent")
+
+        with self.session(mode="WRITE") as session:
+            # Check for circular dependency
+            ancestors = self.get_ancestors(parent_id)
+            if any(a.id == feature_id for a in ancestors):
+                raise ValueError("Circular dependency: feature is already an ancestor of proposed parent")
+
+            result = session.run(
+                """
+                MATCH (child:Feature {id: $child_id})
+                MATCH (parent:Feature {id: $parent_id})
+                OPTIONAL MATCH (child)-[old:CHILD_OF]->(:Feature)
+                DELETE old
+                CREATE (child)-[:CHILD_OF]->(parent)
+                SET child.parent_id = $parent_id
+                RETURN child
+                """,
+                child_id=feature_id,
+                parent_id=parent_id,
+            )
+            record = result.single()
+            if not record:
+                raise ValueError(f"Feature or parent not found")
+            return self._node_to_feature(record["child"])
+
+    def unlink_from_parent(self, feature_id: str) -> Feature:
+        """Remove CHILD_OF relationship."""
+        with self.session(mode="WRITE") as session:
+            result = session.run(
+                """
+                MATCH (child:Feature {id: $id})
+                OPTIONAL MATCH (child)-[r:CHILD_OF]->(:Feature)
+                DELETE r
+                SET child.parent_id = null
+                RETURN child
+                """,
+                id=feature_id,
+            )
+            record = result.single()
+            if not record:
+                raise ValueError(f"Feature not found: {feature_id}")
+            return self._node_to_feature(record["child"])
+
+    def get_descendant_events(self, feature_id: str, limit: int = 50) -> list[dict]:
+        """
+        Get events linked to feature AND all its descendants.
+        For aggregated event display on parent features.
+        """
+        with self.session() as session:
+            result = session.run(
+                """
+                MATCH (f:Feature {id: $id})
+                OPTIONAL MATCH (descendant:Feature)-[:CHILD_OF*0..]->(f)
+                WITH collect(DISTINCT f) + collect(DISTINCT descendant) as features
+                UNWIND features as feature
+                MATCH (e:Event)-[:LINKED_TO]->(feature)
+                RETURN e, feature.id as feature_id
+                ORDER BY e.timestamp DESC
+                LIMIT $limit
+                """,
+                id=feature_id,
+                limit=limit,
+            )
+            return [
+                {**dict(record["e"]), "feature_id": record["feature_id"]}
+                for record in result
+            ]
+
+    # =========================================================================
     # STATS OPERATIONS
     # =========================================================================
 
