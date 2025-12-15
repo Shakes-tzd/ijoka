@@ -78,6 +78,7 @@ defmodule IjokaWebWeb.DashboardLive do
       |> assign(:selected_feature_events, [])
       |> assign(:selected_feature_steps, [])
       |> assign(:selected_event, nil)
+      |> assign(:expanded_modal_event, nil)
       |> stream(:events, events_with_id, at: 0)
       |> stream(:features_pending, filter_by_status(features, :pending), at: -1)
       |> stream(:features_in_progress, filter_by_status(features, :in_progress), at: -1)
@@ -237,6 +238,13 @@ defmodule IjokaWebWeb.DashboardLive do
 
   def handle_event("close_event_modal", _, socket) do
     {:noreply, assign(socket, :selected_event, nil)}
+  end
+
+  def handle_event("toggle_modal_event", %{"id" => event_id}, socket) do
+    # Toggle expansion: if same event clicked, collapse; otherwise expand new one
+    current = socket.assigns[:expanded_modal_event]
+    new_expanded = if current == event_id, do: nil, else: event_id
+    {:noreply, assign(socket, :expanded_modal_event, new_expanded)}
   end
 
   # Noop handler for stopping event propagation without action
@@ -566,7 +574,7 @@ defmodule IjokaWebWeb.DashboardLive do
       </main>
 
       <!-- Feature Modal -->
-      <.feature_modal :if={@selected_feature} feature={@selected_feature} events={@selected_feature_events} step_nodes={@selected_feature_steps} />
+      <.feature_modal :if={@selected_feature} feature={@selected_feature} events={@selected_feature_events} step_nodes={@selected_feature_steps} expanded_event={@expanded_modal_event} />
 
       <!-- Event Detail Modal -->
       <.event_detail_modal :if={@selected_event} event={@selected_event} />
@@ -643,7 +651,7 @@ defmodule IjokaWebWeb.DashboardLive do
             </ol>
           </div>
 
-          <!-- Activity History Section - Reuses activity_card component -->
+          <!-- Activity History Section - Expandable cards for in-modal viewing -->
           <div :if={length(@events) > 0} class="modal-events-section">
             <h3 class="modal-events-header">
               <svg class="events-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -653,7 +661,7 @@ defmodule IjokaWebWeb.DashboardLive do
               <span class="events-count-badge">{length(@events)}</span>
             </h3>
             <div class="modal-events-list">
-              <.activity_card :for={event <- Enum.take(@events, 20)} event={event} />
+              <.expandable_activity_card :for={event <- Enum.take(@events, 20)} event={event} expanded={@expanded_event == event[:dom_id]} />
             </div>
           </div>
         </div>
@@ -674,14 +682,6 @@ defmodule IjokaWebWeb.DashboardLive do
   end
 
   defp event_detail_modal(assigns) do
-    payload = parse_payload(assigns.event[:payload])
-    success_status = get_success_status(assigns.event)
-
-    assigns =
-      assigns
-      |> assign(:payload, payload)
-      |> assign(:success_status, success_status)
-
     ~H"""
     <div class="modal-overlay event-modal-overlay" phx-click="close_event_modal" phx-click-away="close_event_modal">
       <div class="event-modal-content" phx-click="noop">
@@ -691,15 +691,7 @@ defmodule IjokaWebWeb.DashboardLive do
             <div class="event-modal-icon">
               <.tool_icon tool={get_event_icon(@event)} />
             </div>
-            <div class="event-modal-title-info">
-              <h2 class="event-modal-title">{get_descriptive_title(@event)}</h2>
-              <div class="event-modal-badges">
-                <span class="event-type-badge">{@event[:event_type]}</span>
-                <span :if={@event[:tool_name]} class="event-tool-badge">{@event[:tool_name]}</span>
-                <span :if={@success_status == true} class="status-badge status-success">Success</span>
-                <span :if={@success_status == false} class="status-badge status-error">Failed</span>
-              </div>
-            </div>
+            <h2 class="event-modal-title">{get_descriptive_title(@event)}</h2>
           </div>
           <button class="modal-close" phx-click="close_event_modal">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -709,47 +701,74 @@ defmodule IjokaWebWeb.DashboardLive do
           </button>
         </div>
 
-        <!-- Metadata Grid -->
+        <!-- Body - uses shared event_detail_content component -->
         <div class="event-modal-body">
-          <div class="event-meta-grid">
-            <div class="meta-item">
-              <span class="meta-label">Agent</span>
-              <span class={"meta-value agent-#{agent_type(@event[:source_agent])}"}>
-                {format_agent(@event[:source_agent])}
-              </span>
-            </div>
-            <div :if={@event[:tool_name]} class="meta-item">
-              <span class="meta-label">Tool</span>
-              <span class="meta-value">{@event[:tool_name]}</span>
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">Time</span>
-              <span class="meta-value">{format_full_time(@event[:created_at])}</span>
-            </div>
-            <div :if={@event[:project_dir]} class="meta-item">
-              <span class="meta-label">Project</span>
-              <span class="meta-value">{get_project_name(@event[:project_dir])}</span>
-            </div>
-            <div :if={@event[:feature_id]} class="meta-item">
-              <span class="meta-label">Feature</span>
-              <span class="meta-value feature-value">{@event[:feature_id]}</span>
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">Session</span>
-              <span class="meta-value session-value">{@event[:session_id]}</span>
-            </div>
-          </div>
-
-          <!-- Tool-specific content -->
-          <.tool_content event={@event} payload={@payload} />
-
-          <!-- Raw Payload -->
-          <details class="raw-payload-section">
-            <summary>Raw Payload</summary>
-            <pre class="raw-payload">{format_payload_json(@payload)}</pre>
-          </details>
+          <.event_detail_content event={@event} />
         </div>
       </div>
+    </div>
+    """
+  end
+
+  # Shared event detail content component.
+  # Used by both event_detail_modal (full modal) and expandable_activity_card (inline expansion).
+  defp event_detail_content(assigns) do
+    success_status = get_success_status(assigns.event)
+    payload = parse_payload(assigns.event[:payload])
+
+    assigns =
+      assigns
+      |> assign(:success_status, success_status)
+      |> assign(:payload, payload)
+
+    ~H"""
+    <div class="event-detail-content">
+      <!-- Badges -->
+      <div class="event-detail-badges">
+        <span class="event-type-badge">{@event[:event_type]}</span>
+        <span :if={@event[:tool_name]} class="event-tool-badge">{@event[:tool_name]}</span>
+        <span :if={@success_status == true} class="status-badge status-success">Success</span>
+        <span :if={@success_status == false} class="status-badge status-error">Failed</span>
+      </div>
+
+      <!-- Metadata Grid -->
+      <div class="event-meta-grid">
+        <div class="meta-item">
+          <span class="meta-label">Agent</span>
+          <span class={"meta-value agent-#{agent_type(@event[:source_agent])}"}>
+            {format_agent(@event[:source_agent])}
+          </span>
+        </div>
+        <div :if={@event[:tool_name]} class="meta-item">
+          <span class="meta-label">Tool</span>
+          <span class="meta-value">{@event[:tool_name]}</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Time</span>
+          <span class="meta-value">{format_full_time(@event[:created_at])}</span>
+        </div>
+        <div :if={@event[:project_dir]} class="meta-item">
+          <span class="meta-label">Project</span>
+          <span class="meta-value">{get_project_name(@event[:project_dir])}</span>
+        </div>
+        <div :if={@event[:feature_id]} class="meta-item">
+          <span class="meta-label">Feature</span>
+          <span class="meta-value feature-value">{@event[:feature_id]}</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Session</span>
+          <span class="meta-value session-value">{@event[:session_id]}</span>
+        </div>
+      </div>
+
+      <!-- Tool-specific content -->
+      <.tool_content event={@event} payload={@payload} />
+
+      <!-- Raw Payload -->
+      <details class="raw-payload-section">
+        <summary>Raw Payload</summary>
+        <pre class="raw-payload">{format_payload_json(@payload)}</pre>
+      </details>
     </div>
     """
   end
@@ -1107,6 +1126,53 @@ defmodule IjokaWebWeb.DashboardLive do
           <span :if={@success_status == true} class="status-check" title="Success">✓</span>
           <span :if={@success_status == false} class="status-x" title="Failed">✗</span>
         </div>
+      </div>
+    </div>
+    """
+  end
+
+  # Expandable activity card for modal context - expands in place instead of opening modal
+  defp expandable_activity_card(assigns) do
+    success_status = get_success_status(assigns.event)
+    payload = parse_payload(assigns.event[:payload])
+    assigns = assigns
+      |> assign(:success_status, success_status)
+      |> assign(:payload, payload)
+
+    ~H"""
+    <div
+      class={[
+        "activity-card expandable-card",
+        @success_status == true && "status-success",
+        @success_status == false && "status-error",
+        @expanded && "expanded"
+      ]}
+      id={@event[:dom_id]}
+      phx-click="toggle_modal_event"
+      phx-value-id={@event[:dom_id]}
+    >
+      <!-- Collapsed view: Icon + Type + Title + Time -->
+      <div class="card-left">
+        <div class="card-icon">
+          <.tool_icon tool={get_event_icon(@event)} />
+        </div>
+        <span class="event-type-label">{get_event_badge(@event[:event_type])}</span>
+      </div>
+
+      <div class="card-body">
+        <p class="card-title">{get_descriptive_title(@event)}</p>
+        <div class="card-footer">
+          <span class={"agent-dot agent-#{agent_type(@event[:source_agent])}"} title={@event[:source_agent]}></span>
+          <span class="event-time">{format_time(@event[:created_at])}</span>
+          <span :if={@success_status == true} class="status-check" title="Success">✓</span>
+          <span :if={@success_status == false} class="status-x" title="Failed">✗</span>
+          <span class="expand-indicator">{if @expanded, do: "▼", else: "▶"}</span>
+        </div>
+      </div>
+
+      <!-- Expanded details - uses shared event_detail_content component -->
+      <div :if={@expanded} class="card-expanded-content">
+        <.event_detail_content event={@event} />
       </div>
     </div>
     """

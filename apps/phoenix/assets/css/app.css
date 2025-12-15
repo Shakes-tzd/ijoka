@@ -1842,3 +1842,105 @@ body.ijoka-app {
 .modal-events-list .activity-card .event-type-label {
   font-size: 9px;
 }
+
+/* Expandable activity cards */
+.expandable-card {
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-wrap: wrap;
+}
+
+.expandable-card:hover {
+  background: var(--bg-secondary);
+}
+
+.expandable-card .expand-indicator {
+  color: var(--text-muted);
+  font-size: 8px;
+  margin-left: auto;
+}
+
+.expandable-card.expanded {
+  background: var(--bg-secondary);
+  border-color: var(--border-highlight);
+}
+
+.expandable-card .card-expanded-content {
+  width: 100%;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+/* Shared event-detail-content within expandable cards */
+.expandable-card .event-detail-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.expandable-card .event-detail-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.expandable-card .event-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+  font-size: 11px;
+}
+
+.expandable-card .meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.expandable-card .meta-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+.expandable-card .meta-value {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  word-break: break-word;
+}
+
+.expandable-card .tool-content-section {
+  font-size: 11px;
+}
+
+.expandable-card .tool-detail h4 {
+  font-size: 10px;
+  margin-bottom: 4px;
+}
+
+.expandable-card .code-block {
+  font-size: 10px;
+  max-height: 120px;
+  overflow: auto;
+}
+
+.expandable-card .raw-payload-section {
+  font-size: 11px;
+}
+
+.expandable-card .raw-payload-section summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.expandable-card .raw-payload {
+  font-size: 9px;
+  max-height: 150px;
+  overflow: auto;
+}
