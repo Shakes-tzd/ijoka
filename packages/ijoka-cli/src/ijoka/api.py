@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Path, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from .analytics import AgentProfiler, InsightSynthesizer, PatternDetector, TemporalAnalyzer
 from .db import IjokaClient
@@ -148,6 +148,21 @@ class DiscoverFeatureRequest(BaseModel):
     steps: Optional[list[str]] = None
     lookback_minutes: int = Field(default=60, ge=1)
     mark_complete: bool = False
+
+
+class HierarchyNode(BaseModel):
+    """Recursive hierarchy structure for feature hierarchy."""
+    feature: Feature
+    children: list["HierarchyNode"] = []
+    child_count: int = 0
+    descendant_count: int = 0
+    event_count: int = 0
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+# Enable recursive reference
+HierarchyNode.model_rebuild()
 
 
 class PlanResponse(BaseModel):
@@ -388,6 +403,142 @@ async def archive_feature(feature_id: str):
         raise HTTPException(status_code=404, detail=f"Feature not found: {feature_id}")
 
     return MessageResponse(message=f"Archived feature: {feature_id}")
+
+
+# =============================================================================
+# HIERARCHY ENDPOINTS
+# =============================================================================
+
+
+@app.get("/features/{feature_id}/children", tags=["Hierarchy"])
+async def get_feature_children(feature_id: str = Path(..., description="Feature ID")):
+    """Get immediate child features."""
+    client = get_client()
+    children = client.get_children(feature_id)
+    return {
+        "success": True,
+        "feature_id": feature_id,
+        "children": [f.model_dump() for f in children],
+        "count": len(children)
+    }
+
+
+@app.get("/features/{feature_id}/descendants", tags=["Hierarchy"])
+async def get_feature_descendants(feature_id: str = Path(..., description="Feature ID")):
+    """Get all descendant features (recursive)."""
+    client = get_client()
+    descendants = client.get_descendants(feature_id)
+    return {
+        "success": True,
+        "feature_id": feature_id,
+        "descendants": [f.model_dump() for f in descendants],
+        "count": len(descendants)
+    }
+
+
+@app.get("/features/{feature_id}/ancestors", tags=["Hierarchy"])
+async def get_feature_ancestors(feature_id: str = Path(..., description="Feature ID")):
+    """Get all ancestor features (parent chain)."""
+    client = get_client()
+    ancestors = client.get_ancestors(feature_id)
+    return {
+        "success": True,
+        "feature_id": feature_id,
+        "ancestors": [f.model_dump() for f in ancestors],
+        "count": len(ancestors)
+    }
+
+
+@app.get("/features/{feature_id}/tree", tags=["Hierarchy"])
+async def get_feature_tree(
+    feature_id: str = Path(..., description="Feature ID"),
+    include_events: bool = Query(False, description="Include aggregated event counts")
+):
+    """
+    Get full hierarchy tree rooted at feature.
+
+    Include_events parameter optionally includes aggregated event counts from all descendants.
+    This allows parent features (epics) to show total work across children.
+    """
+    client = get_client()
+    tree = client.get_hierarchy(feature_id)
+
+    if not tree:
+        raise HTTPException(status_code=404, detail=f"Feature not found: {feature_id}")
+
+    # Add aggregated event counts if requested
+    if include_events:
+        events = client.get_descendant_events(feature_id, limit=1000)
+        tree["total_events"] = len(events)
+
+        # Count events per feature in hierarchy
+        event_counts = {}
+        for event in events:
+            fid = event.get("feature_id")
+            event_counts[fid] = event_counts.get(fid, 0) + 1
+        tree["event_counts_by_feature"] = event_counts
+
+    return {"success": True, "tree": tree}
+
+
+@app.post("/features/{feature_id}/link/{parent_id}", tags=["Hierarchy"])
+async def link_feature_to_parent(
+    feature_id: str = Path(..., description="Child feature ID"),
+    parent_id: str = Path(..., description="Parent feature ID")
+):
+    """
+    Link feature as child of parent (creates CHILD_OF relationship).
+
+    Note: This is for HIERARCHY, not event attribution.
+    Events still route via score_attribution() to best-matching feature.
+    """
+    client = get_client()
+    try:
+        feature = client.link_to_parent(feature_id, parent_id)
+        return {
+            "success": True,
+            "feature": feature.model_dump(),
+            "parent_id": parent_id,
+            "message": f"Feature linked to parent {parent_id}"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/features/{feature_id}/parent", tags=["Hierarchy"])
+async def unlink_feature_from_parent(feature_id: str = Path(..., description="Feature ID")):
+    """Remove parent relationship (unlink from hierarchy)."""
+    client = get_client()
+    try:
+        feature = client.unlink_from_parent(feature_id)
+        return {
+            "success": True,
+            "feature": feature.model_dump(),
+            "message": "Feature unlinked from parent"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/features/{feature_id}/events/aggregated", tags=["Hierarchy"])
+async def get_aggregated_events(
+    feature_id: str = Path(..., description="Feature ID"),
+    limit: int = Query(50, description="Maximum events to return")
+):
+    """
+    Get events from feature AND all its descendants.
+
+    Aggregates events across entire hierarchy.
+    Useful for epics to see all work done on child features/bugs/spikes.
+    """
+    client = get_client()
+    events = client.get_descendant_events(feature_id, limit=limit)
+    return {
+        "success": True,
+        "feature_id": feature_id,
+        "events": events,
+        "count": len(events)
+    }
 
 
 # =============================================================================
