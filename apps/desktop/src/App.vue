@@ -238,9 +238,25 @@ onMounted(async () => {
         invoke<AgentEvent[]>('get_events', { limit: 50 }),
         invoke<Stats>('get_stats', { projectPath: selectedProject.value }),
       ])
-      // Only update if there are new events (compare by first event id)
-      if (eventsData.length > 0 && (events.value.length === 0 || eventsData[0].id !== events.value[0]?.id)) {
-        events.value = eventsData
+
+      // Smarter update: only update if data actually changed
+      const currentFirstId = events.value[0]?.id
+      const newFirstId = eventsData[0]?.id
+
+      // Check if there are new events OR if the order changed
+      if (newFirstId !== currentFirstId) {
+        // Find how many new events to prepend (avoid full array replacement)
+        const currentIds = new Set(events.value.map(e => e.id))
+        const newEvents = eventsData.filter(e => !currentIds.has(e.id))
+
+        if (newEvents.length > 0 && newEvents.length < eventsData.length) {
+          // Prepend only new events (more efficient for incremental updates)
+          const merged = [...newEvents, ...events.value.slice(0, 50 - newEvents.length)]
+          events.value = merged
+        } else {
+          // Full replacement if too many changes or initial load
+          events.value = eventsData
+        }
         stats.value = statsData
       }
     } catch (e) {

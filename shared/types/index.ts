@@ -31,7 +31,7 @@ export interface Feature {
   id?: string;
 }
 
-export type FeatureCategory = 
+export type FeatureCategory =
   | 'functional'
   | 'ui'
   | 'security'
@@ -39,7 +39,9 @@ export type FeatureCategory =
   | 'documentation'
   | 'testing'
   | 'infrastructure'
-  | 'refactoring';
+  | 'refactoring'
+  | 'planning'      // Knowledge acquisition: research, design, discovery, backlog alignment
+  | 'meta';         // Process optimization: tooling, observability, workflow improvements
 
 export interface FeatureList {
   features: Feature[];

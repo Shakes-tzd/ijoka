@@ -144,9 +144,14 @@ function formatTime(dateStr: string): string {
   if (!dateStr) return '--:--'
   // Memgraph returns timestamps like "2025-12-09T12:41:19.672765+00:00[Etc/UTC]"
   // Remove the [timezone] suffix that JS Date can't parse
-  const cleanedStr = dateStr.replace(/\[.*\]$/, '')
+  let cleanedStr = dateStr.replace(/\[.*\]$/, '')
+  // Also remove any extra quotes that might be present from JSON serialization
+  cleanedStr = cleanedStr.replace(/^"|"$/g, '')
   const date = new Date(cleanedStr)
-  if (isNaN(date.getTime())) return '--:--'
+  if (isNaN(date.getTime())) {
+    console.warn('Failed to parse date:', dateStr, '->', cleanedStr)
+    return '--:--'
+  }
   return date.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',

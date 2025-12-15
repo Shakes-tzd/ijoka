@@ -1,6 +1,6 @@
-# Add Feature Command
+# /add-feature
 
-Add a new feature to feature_list.json in a deterministic, validated way.
+Add a new feature to the Ijoka graph database.
 
 ## Usage
 
@@ -8,55 +8,66 @@ Add a new feature to feature_list.json in a deterministic, validated way.
 /add-feature <category> <description>
 ```
 
-**Categories:** infrastructure, functional, ui, documentation, testing, security
+**Categories:** functional, ui, security, performance, documentation, testing, infrastructure, refactoring, planning, meta
 
 ## Instructions
 
 When this command is invoked:
 
 1. **Parse the arguments** from: $ARGUMENTS
+   - First word = category
+   - Remaining words = description
 
-2. **Validate the feature_list.json exists** in the current project directory. If not, create it with an empty array.
+2. **Validate category** - Must be one of:
+   - functional, ui, security, performance, documentation
+   - testing, infrastructure, refactoring, planning, meta
 
-3. **Check for duplicates** - ensure no existing feature has the same description (case-insensitive).
+3. **Check for duplicates** - Run `ijoka status`
+   - Use fuzzy matching on descriptions
+   - If duplicate found, ask user to confirm or modify
 
-4. **Add the new feature** with this exact structure:
-   ```json
-   {
-     "category": "<category>",
-     "description": "<description>",
-     "steps": [],
-     "passes": false,
-     "inProgress": false
-   }
+4. **Create the feature**:
+   ```bash
+   ijoka feature create --category "<category>" --priority 50 "<description>"
    ```
 
-5. **Preserve existing features** - append to the array, never modify existing entries.
-
-6. **Write the file** with proper JSON formatting (2-space indent).
-
-7. **Report success** with the new feature count.
+5. **Confirm creation** - Show:
+   - Feature created successfully
+   - Current feature count
+   - Suggest `/next-feature` if no active feature
 
 ## Validation Rules
 
-- Category must be one of: infrastructure, functional, ui, documentation, testing, security
-- Description must be non-empty and unique
-- Never modify existing features
-- Always maintain valid JSON structure
+- Category must be valid (see list above)
+- Description must be non-empty
+- Description should be unique (warn on similar features)
 
-## Example
+## Examples
 
 ```
 /add-feature functional User can export data to CSV format
 ```
 
-Creates:
-```json
-{
-  "category": "functional",
-  "description": "User can export data to CSV format",
-  "steps": [],
-  "passes": false,
-  "inProgress": false
-}
+Creates feature:
+- description: "User can export data to CSV format"
+- category: "functional"
+- priority: 50
+
 ```
+/add-feature security Implement rate limiting on API endpoints
+```
+
+Creates feature:
+- description: "Implement rate limiting on API endpoints"
+- category: "security"
+- priority: 50
+
+## Advanced Usage
+
+To specify priority, include it after category:
+
+```
+/add-feature security:90 Implement rate limiting
+```
+
+This creates the feature with priority 90 (higher = more urgent).

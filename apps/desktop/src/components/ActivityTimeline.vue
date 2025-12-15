@@ -103,7 +103,8 @@ const sessionGroups = computed<SessionGroup[]>(() => {
       const hasInternalPrompt = group.events.some(e => {
         if (e.eventType === 'UserQuery' && e.payload) {
           try {
-            const payload = JSON.parse(e.payload)
+            // Handle both string (from SQLite) and object (from Memgraph)
+            const payload = typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload
             const prompt = (payload.prompt || payload.preview || '').toLowerCase()
             // Patterns that indicate internal/automated sessions
             return prompt.includes('feature classifier') ||

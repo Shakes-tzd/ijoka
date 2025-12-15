@@ -35,6 +35,15 @@ yarn-error.log*
 .cache/
 *.tsbuildinfo
 
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+
 # Database (local development)
 *.db
 *.sqlite
@@ -45,3 +54,4 @@ coverage/
 
 # Misc
 *.local
+worktrees/

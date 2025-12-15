@@ -1,0 +1,39 @@
+{
+  "name": "@ijoka/mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server for Ijoka - AI agent observability and orchestration",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "ijoka-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "minimatch": "^10.0.1",
+    "neo4j-driver": "^5.27.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "mcp",
+    "claude",
+    "ai-agents",
+    "observability"
+  ]
+}

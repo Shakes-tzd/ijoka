@@ -42,3 +42,37 @@ liveSocket.connect()
 // >> liveSocket.disableLatencySim()
 window.liveSocket = liveSocket
 
+// Register Service Worker for PWA
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then((registration) => {
+        console.log('[PWA] Service Worker registered:', registration.scope)
+
+        // Check for updates periodically
+        setInterval(() => {
+          registration.update()
+        }, 60 * 60 * 1000) // Check every hour
+      })
+      .catch((error) => {
+        console.log('[PWA] Service Worker registration failed:', error)
+      })
+  })
+}
+
+// Handle PWA install prompt
+let deferredPrompt
+window.addEventListener('beforeinstallprompt', (e) => {
+  // Prevent Chrome 67+ from showing the mini-infobar
+  e.preventDefault()
+  deferredPrompt = e
+
+  // Dispatch custom event for UI to show install button
+  window.dispatchEvent(new CustomEvent('pwa:installable', { detail: { prompt: deferredPrompt } }))
+})
+
+window.addEventListener('appinstalled', () => {
+  deferredPrompt = null
+  console.log('[PWA] App installed successfully')
+})
+

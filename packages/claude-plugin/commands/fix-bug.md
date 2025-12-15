@@ -10,7 +10,7 @@ Report and fix a bug with proper attribution to the correct feature.
 
 ## What This Does
 
-1. Uses `ijoka_status` to get current project context
+1. Gets current project context: `ijoka status`
 2. Identifies which feature the bug relates to:
    - If a feature is actively in progress and the bug is related to it, stay on that feature
    - If the bug is in a different feature, ask user to confirm switching
@@ -25,18 +25,18 @@ When the user reports a bug with `/fix-bug`:
    - What is the actual behavior?
    - How to reproduce?
 
-2. Check current feature context with `ijoka_status`:
+2. Check current feature context with `ijoka status`:
    - If there's an active feature, determine if the bug relates to it
    - If not, search for the related feature
 
 3. Before fixing:
    - Confirm the fix approach with the user
-   - If switching features, use `ijoka_start_feature` to switch
+   - If switching features, run `ijoka feature start <ID>`
 
 4. After fixing:
    - Test the fix
    - If tests pass, consider completing the bug fix
-   - Use `ijoka_record_insight` to document the fix if it's a pattern others might encounter
+   - Run `ijoka insight record` to document the fix if it's a pattern others might encounter
 
 ## Example
 

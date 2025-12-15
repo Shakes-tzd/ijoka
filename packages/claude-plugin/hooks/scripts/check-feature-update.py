@@ -15,7 +15,11 @@ import hashlib
 from pathlib import Path
 from urllib.request import urlopen, Request
 from urllib.error import URLError
+
+# Import shared helpers
+sys.path.insert(0, str(Path(__file__).parent))
 import graph_db_helper as db_helper
+from git_utils import resolve_project_path
 
 SYNC_SERVER = os.environ.get("IJOKA_SERVER", "http://127.0.0.1:4000")
 CACHE_DIR = Path.home() / ".cache" / "ijoka"
@@ -78,8 +82,11 @@ def main():
         print('{"continue": true}')
         return
 
-    # Get project directory
-    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+    # Resolve project path using git-aware resolution
+    # In Ijoka, PROJECT = GIT REPOSITORY - all subdirectories belong to the same project
+    project_dir = resolve_project_path(
+        env_var=os.environ.get("CLAUDE_PROJECT_DIR")
+    )
     feature_file = Path(project_dir) / "feature_list.json"
     
     # Check if feature_list.json was modified

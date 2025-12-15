@@ -1,14 +1,13 @@
 # /next-feature
 
-Start working on the next incomplete feature from `feature_list.json`.
+Start working on the next available feature from the Ijoka graph database.
 
 ## What This Command Does
 
-1. Reads `feature_list.json`
-2. Finds the first feature where `passes: false`
-3. Sets `inProgress: true` on that feature
-4. Displays the feature details and steps
-5. Begins implementation
+1. Queries Memgraph for the next pending feature (highest priority, unblocked)
+2. Starts the feature (sets it as active)
+3. Displays the feature details and any defined steps
+4. Optionally sets up a plan
 
 ## Usage
 
@@ -21,46 +20,62 @@ Optionally specify a category: `/next-feature security`
 User: `/next-feature`
 
 Claude will:
-1. Find: `{"description": "Input validation", "passes": false}`
-2. Update: `{"description": "Input validation", "passes": false, "inProgress": true}`
-3. Display the feature and its verification steps
-4. Begin implementation
+1. Get current status: `ijoka status`
+2. Find next pending feature (highest priority)
+3. Start the feature: `ijoka feature start <ID>`
+4. Display the feature details
+5. Ask if you want to create a step plan
 
 ## Priority Order
 
-When no category is specified, features are prioritized:
-1. **security** - Security vulnerabilities first
-2. **functional** - Core functionality
-3. **testing** - Test coverage
-4. **ui** - User interface
-5. **performance** - Optimizations
-6. **documentation** - Docs
-7. **infrastructure** - DevOps
-8. **refactoring** - Code cleanup
+When no category is specified, features are selected by:
+1. **Priority value** - Higher numbers first (100, 90, 80...)
+2. **Creation order** - Earlier created features first (tie-breaker)
+
+When category specified:
+- Filter to only that category
+- Then apply priority ordering
 
 ## Instructions for Claude
 
 When the user runs this command:
 
-1. Read `feature_list.json` from project root
-2. If file doesn't exist, suggest `/init-project`
-3. Find the first incomplete feature (passes: false)
-   - If category specified, filter to that category
-   - Otherwise, use priority order above
-4. If all features complete, congratulate and suggest adding more
-5. Update the feature to set `inProgress: true`
-6. Display:
-   - Feature description
-   - Category
-   - Verification steps
-7. Begin implementing the feature
-8. Work through each verification step
-9. When complete, update `passes: true` and `inProgress: false`
+1. **Get current status** - Run `ijoka status`
+   - Check if there's already an active feature
+   - If yes, ask: "You have an active feature. Complete it first or switch?"
+
+2. **Find next feature** - From the status response:
+   - Filter to `status: pending` features
+   - If category specified (in $ARGUMENTS), filter by category
+   - Select highest priority unblocked feature
+   - If no features available, suggest `/add-feature`
+
+3. **Start the feature** - Run `ijoka feature start <ID>`
+
+4. **Display feature info**:
+   ```
+   ## Starting Feature
+
+   **Description:** [description]
+   **Category:** [category]
+   **Priority:** [priority]
+
+   ### Verification Steps
+   1. [step 1]
+   2. [step 2]
+   ...
+   ```
+
+5. **Offer to create plan** - Ask if they want to set up a detailed plan:
+   - If yes, help define steps: `ijoka plan set`
+   - If no, proceed with implementation
+
+6. **Begin work** - Start implementing the feature
 
 ## Important Rules
 
 - Only work on ONE feature at a time
 - Complete each step before moving on
 - Test thoroughly before marking as complete
-- NEVER remove or modify existing feature descriptions
-- ONLY change `passes` and `inProgress` fields
+- Report progress: `ijoka checkpoint`
+- Use `/complete-feature` when done

@@ -4,14 +4,30 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
-    <.live_title default="IjokaWeb" suffix=" · Phoenix Framework">
+
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#60a5fa" />
+    <meta name="description" content="Unified observability and orchestration for AI coding agents" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Ijoka" />
+
+    <!-- PWA Manifest -->
+    <link rel="manifest" href={~p"/manifest.json"} />
+
+    <!-- Icons -->
+    <link rel="icon" type="image/png" sizes="32x32" href={~p"/images/icon-32.png"} />
+    <link rel="icon" type="image/png" sizes="16x16" href={~p"/images/icon-16.png"} />
+    <link rel="apple-touch-icon" href={~p"/images/icon-192.png"} />
+
+    <.live_title default="Ijoka" suffix=" · Agent Observability">
       {assigns[:page_title]}
     </.live_title>
     <link phx-track-static rel="stylesheet" href={~p"/assets/app.css"} />
     <script defer phx-track-static type="text/javascript" src={~p"/assets/app.js"}>
     </script>
   </head>
-  <body class="bg-white">
+  <body class="ijoka-app">
     {@inner_content}
   </body>
 </html>

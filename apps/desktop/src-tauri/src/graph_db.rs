@@ -272,29 +272,20 @@ impl GraphDb {
         Ok(())
     }
 
-    /// Activate a feature (set to in_progress, deactivate others)
-    pub async fn activate_feature(&self, project_path: &str, feature_id: &str) -> Result<()> {
+    /// Activate a feature (set to in_progress)
+    /// Multiple features can be in_progress simultaneously
+    pub async fn activate_feature(&self, _project_path: &str, feature_id: &str) -> Result<()> {
         let graph = self.get_graph().await?;
 
-        // Deactivate all features for this project
-        let q1 = query(
-            r#"
-            MATCH (f:Feature {status: 'in_progress'})-[:BELONGS_TO]->(p:Project {path: $project_path})
-            SET f.status = 'pending', f.updated_at = datetime()
-            "#,
-        )
-        .param("project_path", project_path);
-        graph.run(q1).await?;
-
-        // Activate the specified feature
-        let q2 = query(
+        // Activate the specified feature (no longer deactivates others)
+        let q = query(
             r#"
             MATCH (f:Feature {id: $id})
             SET f.status = 'in_progress', f.updated_at = datetime()
             "#,
         )
         .param("id", feature_id);
-        graph.run(q2).await?;
+        graph.run(q).await?;
 
         Ok(())
     }

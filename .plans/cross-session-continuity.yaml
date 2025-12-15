@@ -1,0 +1,193 @@
+# Cross-Session Continuity Enhancement Plan
+# Created: 2024-12-12
+# Status: Draft
+# Design: Simplified (direct relationships, minimal complexity)
+
+metadata:
+  feature_name: "Cross-Session Continuity"
+  description: "Link git commits to features and provide session context handoff"
+  complexity: low
+  estimated_tasks: 5
+  dependencies:
+    - Memgraph running
+    - MCP server operational
+
+## Problem Statement
+
+current_gaps:
+  - git_not_linked: "Commits not tracked in graph"
+  - no_session_summary: "SessionStart doesn't show what previous session accomplished"
+  - no_step_progress: "SessionStart doesn't show current plan steps"
+  - no_session_ancestry: "No link between consecutive sessions"
+
+## Solution Architecture (Simplified)
+
+approach: "Direct relationships, keep existing patterns, add only what's needed"
+
+schema_additions:
+  nodes:
+    - name: "Commit"
+      properties: [hash, message, timestamp, author]
+
+  relationships:
+    - "(:Commit)-[:IMPLEMENTED_IN]->(:Feature)"
+    - "(:Session)-[:MADE_COMMITS]->(:Commit)"
+    - "(:Session)-[:CONTINUED_FROM]->(:Session)"
+
+# What we're NOT doing (keeping it simple):
+excluded:
+  - "commit_hash on StatusEvent (over-engineered)"
+  - "Feature evolution chains (future need)"
+  - "Complex temporal queries"
+
+## Implementation Tasks
+
+tasks:
+  - id: task-1
+    title: "Schema: Add Commit node and relationships"
+    description: |
+      Add to graph_db_helper.py:
+
+      def insert_commit(hash: str, message: str, author: str = None) -> str:
+          cypher = '''
+          CREATE (c:Commit {
+              id: $hash,
+              hash: $hash,
+              message: $message,
+              author: $author,
+              timestamp: timestamp()
+          })
+          RETURN c.id
+          '''
+          return run_write_query(cypher, {...})
+
+      def link_commit_to_feature(commit_hash: str, feature_id: str):
+          cypher = '''
+          MATCH (c:Commit {hash: $hash})
+          MATCH (f:Feature {id: $feature_id})
+          CREATE (c)-[:IMPLEMENTED_IN]->(f)
+          '''
+
+      def link_commit_to_session(commit_hash: str, session_id: str):
+          cypher = '''
+          MATCH (c:Commit {hash: $hash})
+          MATCH (s:Session {id: $session_id})
+          CREATE (s)-[:MADE_COMMITS]->(c)
+          '''
+
+      def link_session_ancestry(new_session_id: str, prev_session_id: str):
+          cypher = '''
+          MATCH (new:Session {id: $new_id})
+          MATCH (prev:Session {id: $prev_id})
+          CREATE (new)-[:CONTINUED_FROM]->(prev)
+          '''
+    files:
+      - packages/claude-plugin/hooks/scripts/graph_db_helper.py
+    acceptance:
+      - "insert_commit() works"
+      - "link_commit_to_feature() works"
+      - "link_session_ancestry() works"
+
+  - id: task-2
+    title: "Hook: Session ancestry on SessionStart"
+    description: |
+      In session-start.py:
+      1. Query for last session in this project:
+         MATCH (s:Session {project_id: $project})
+         WHERE s.id <> $current_session
+         RETURN s.id ORDER BY s.created_at DESC LIMIT 1
+
+      2. If found, call link_session_ancestry()
+
+      3. Capture HEAD commit:
+         subprocess.run(['git', 'rev-parse', 'HEAD'])
+         Store on Session node as start_commit
+    files:
+      - packages/claude-plugin/hooks/scripts/session-start.py
+    acceptance:
+      - "CONTINUED_FROM relationship created"
+      - "start_commit captured on Session"
+    depends_on: [task-1]
+
+  - id: task-3
+    title: "Hook: Capture git commits in PostToolUse"
+    description: |
+      In track-event.py, detect Bash tool calls containing "git commit":
+      1. Check if tool_name == "Bash" and "git commit" in tool_input
+      2. Parse commit hash from output (look for "[branch hash]" pattern)
+      3. Call insert_commit() with hash and message
+      4. Call link_commit_to_session()
+      5. If active feature, call link_commit_to_feature()
+    files:
+      - packages/claude-plugin/hooks/scripts/track-event.py
+    acceptance:
+      - "git commit detected"
+      - "Commit node created"
+      - "Linked to session and feature"
+    depends_on: [task-1]
+
+  - id: task-4
+    title: "Context: Rich SessionStart output"
+    description: |
+      Enhance session-start.py additionalContext:
+
+      1. Last session summary:
+         MATCH (current:Session {id: $id})-[:CONTINUED_FROM]->(prev)
+         OPTIONAL MATCH (prev)-[:WORKED_ON]->(f:Feature)
+         OPTIONAL MATCH (prev)-[:MADE_COMMITS]->(c:Commit)
+         RETURN prev.ended_at, collect(DISTINCT f.description), collect(DISTINCT c.message)
+
+      2. Step progress (already have Step nodes):
+         MATCH (f:Feature {id: $active})-[:HAS_STEP]->(s:Step)
+         RETURN s.description, s.status ORDER BY s.step_order
+
+      3. Recent commits for feature:
+         MATCH (f:Feature {id: $active})<-[:IMPLEMENTED_IN]-(c:Commit)
+         RETURN c.hash, c.message ORDER BY c.timestamp DESC LIMIT 3
+
+      Format as markdown in additionalContext.
+    files:
+      - packages/claude-plugin/hooks/scripts/session-start.py
+    acceptance:
+      - "Previous session summary shown"
+      - "Step progress shown"
+      - "Recent commits listed"
+    depends_on: [task-2, task-3]
+
+  - id: task-5
+    title: "Test: End-to-end session continuity"
+    description: |
+      Manual test:
+      1. Start session, make a commit, end session
+      2. Start new session
+      3. Verify context shows:
+         - Previous session summary
+         - Commit from last session
+         - Step progress if plan exists
+
+      Validation query:
+        MATCH (s2:Session)-[:CONTINUED_FROM]->(s1:Session)
+        MATCH (s1)-[:MADE_COMMITS]->(c:Commit)
+        RETURN s1.id, s2.id, c.hash
+    files: []
+    acceptance:
+      - "Session ancestry visible in graph"
+      - "Commits linked correctly"
+      - "Context handoff works"
+    depends_on: [task-4]
+
+## Execution Strategy
+
+execution_order:
+  1: task-1  # Schema (required by all)
+  2: [task-2, task-3]  # Parallel - session ancestry + commit capture
+  3: task-4  # Context output (needs 2 & 3)
+  4: task-5  # Testing
+
+## Success Criteria
+
+definition_of_done:
+  - "New session shows what previous session did"
+  - "Commits linked to features"
+  - "Step progress visible at session start"
+  - "Simple, maintainable code"

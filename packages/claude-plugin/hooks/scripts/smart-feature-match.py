@@ -23,9 +23,10 @@ import os
 import sys
 from pathlib import Path
 
-# Import shared database helper (Memgraph)
+# Import shared helpers
 sys.path.insert(0, str(Path(__file__).parent))
 import graph_db_helper as db_helper
+from git_utils import resolve_project_path
 
 
 def main():
@@ -39,19 +40,14 @@ def main():
     tool_input = hook_input.get("tool_input", {})
     session_id = hook_input.get("session_id") or os.environ.get("CLAUDE_SESSION_ID", "")
 
-    # Get project directory
-    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "")
-    if not project_dir:
-        file_path = tool_input.get("file_path", "")
-        if file_path:
-            path = Path(file_path)
-            for parent in [path] + list(path.parents):
-                if (parent / "feature_list.json").exists():
-                    project_dir = str(parent)
-                    break
-
-    if not project_dir:
-        project_dir = os.getcwd()
+    # Resolve project path using git-aware resolution
+    # In Ijoka, PROJECT = GIT REPOSITORY - all subdirectories belong to the same project
+    file_path = tool_input.get("file_path", "")
+    project_dir = resolve_project_path(
+        cwd=hook_input.get("cwd"),
+        file_path=file_path,
+        env_var=os.environ.get("CLAUDE_PROJECT_DIR")
+    )
 
     # Skip meta-tools entirely
     if tool_name in {"TodoRead", "TodoWrite", "Read", "Glob", "Grep"}:

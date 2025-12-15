@@ -4,8 +4,14 @@
 # dependencies = ["neo4j>=5.0"]
 # ///
 """
-Fix feature statuses based on recent implementation work.
-Also creates StatusEvent nodes for audit trail.
+DEPRECATED: Historical migration script for fixing feature statuses.
+
+This script was used during the transition from MCP server to CLI.
+It is kept for reference but should not be run on production data.
+
+For feature status management, use:
+- `ijoka feature start <ID>` - Start working on a feature
+- `ijoka feature complete` - Mark current feature as complete
 """
 
 from neo4j import GraphDatabase

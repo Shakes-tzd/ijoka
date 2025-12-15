@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.ijoka.app",
   "build": {
-    "beforeDevCommand": "pnpm dev:frontend",
-    "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "pnpm build:frontend",
+    "beforeDevCommand": "",
+    "devUrl": "http://localhost:4001",
+    "beforeBuildCommand": "",
     "frontendDist": "../dist"
   },
   "app": {

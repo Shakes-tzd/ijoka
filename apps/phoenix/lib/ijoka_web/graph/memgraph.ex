@@ -74,14 +74,16 @@ defmodule IjokaWeb.Graph.Memgraph do
   end
 
   @doc """
-  Get all features for a project.
+  Get all features for a project with parent info.
   """
   def get_features(project_path) do
     cypher = """
     MATCH (f:Feature)-[:BELONGS_TO]->(p:Project {path: $project_path})
+    OPTIONAL MATCH (f)-[:CHILD_OF]->(parent:Feature)
     RETURN f.id as id, f.description as description, f.category as category,
            f.passes as passes, f.in_progress as in_progress, f.agent as agent,
-           f.work_count as work_count, f.priority as priority
+           f.work_count as work_count, f.priority as priority, f.type as type,
+           f.parent_id as parent_id, parent.description as parent_description
     ORDER BY f.priority DESC, f.created_at DESC
     """
 
@@ -98,7 +100,10 @@ defmodule IjokaWeb.Graph.Memgraph do
               in_progress: row["in_progress"] || false,
               agent: row["agent"],
               work_count: row["work_count"] || 0,
-              priority: row["priority"] || 100
+              priority: row["priority"] || 100,
+              type: row["type"] || "feature",
+              parent_id: row["parent_id"],
+              parent_description: row["parent_description"]
             }
           end)
 
@@ -227,6 +232,42 @@ defmodule IjokaWeb.Graph.Memgraph do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  @doc """
+  Get child count for a feature.
+  """
+  def get_child_count(feature_id) do
+    cypher = """
+    MATCH (child:Feature)-[:CHILD_OF]->(parent:Feature {id: $feature_id})
+    RETURN count(child) as count
+    """
+
+    case query(cypher, %{feature_id: feature_id}) do
+      {:ok, [%{"count" => count}]} -> {:ok, count}
+      {:ok, []} -> {:ok, 0}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Get aggregated event count (feature + all descendants).
+  """
+  def get_hierarchy_event_count(feature_id) do
+    cypher = """
+    MATCH (f:Feature {id: $feature_id})
+    OPTIONAL MATCH (descendant:Feature)-[:CHILD_OF*0..]->(f)
+    WITH collect(DISTINCT f) + collect(DISTINCT descendant) as features
+    UNWIND features as feature
+    MATCH (e:Event)-[:LINKED_TO]->(feature)
+    RETURN count(e) as count
+    """
+
+    case query(cypher, %{feature_id: feature_id}) do
+      {:ok, [%{"count" => count}]} -> {:ok, count}
+      {:ok, []} -> {:ok, 0}
+      {:error, reason} -> {:error, reason}
     end
   end
 

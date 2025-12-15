@@ -3,6 +3,10 @@
     "ijoka": {
       "command": "node",
       "args": ["/Users/shakes/DevProjects/ijoka/packages/mcp-server/dist/index.js"]
+    },
+        "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest"]
     }
   }
 }

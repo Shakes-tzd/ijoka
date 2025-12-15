@@ -1,37 +1,78 @@
-# Complete Feature Command
+# /complete-feature
 
-Mark the currently active feature as complete.
+Mark the currently active feature as complete in the Ijoka graph database.
+
+## Usage
+
+```
+/complete-feature [summary]
+```
+
+Optionally provide a summary of what was accomplished.
 
 ## Instructions
 
-1. Read `feature_list.json` to find the feature with `inProgress: true`
-2. Update that feature:
-   - Set `passes: true`
-   - Set `inProgress: false`
-3. Save the file
-4. Report what was completed and suggest next steps
+When this command is invoked:
 
-## Example Update
+1. **Get current status** - Run `ijoka status` to find the active feature
 
-```json
-{
-  "category": "functional",
-  "description": "The feature that was completed",
-  "steps": ["verification steps"],
-  "passes": true,      // Changed from false
-  "inProgress": false  // Changed from true
-}
-```
+2. **If no active feature**:
+   - Report: "No feature is currently active"
+   - Suggest: "Use `/next-feature` to start working on something"
 
-## After Completion
+3. **Verify completion** - Before marking complete, check:
+   - Has work been done? (check for recent events/commits)
+   - Are there pending plan steps? Run `ijoka plan show`
+   - If incomplete plan, warn: "Plan has uncompleted steps. Mark complete anyway?"
 
-Show:
-- Which feature was marked complete
-- Current progress (X/Y features done)
-- Next incomplete feature to work on
+4. **Complete the feature**:
+   ```bash
+   ijoka feature complete --summary "summary text"
+   ```
 
-## Important
+5. **Show completion summary**:
+   ```
+   ## Feature Completed
+
+   **Feature:** [description]
+   **Summary:** [what was done]
+
+   ### Progress
+   - Completed: X/Y features (Z%)
+   - Next up: [next pending feature]
+
+   ### Suggested Actions
+   - Run `/next-feature` to continue
+   - Run `/feature-status` to see all features
+   ```
+
+6. **Suggest git commit** if changes haven't been committed:
+   - Check for uncommitted changes
+   - Offer to create a commit
+
+## Important Notes
 
 - Only mark a feature complete if the work is actually done
-- If the user wants to continue working on it, don't complete it
-- If no feature is currently active, report that and suggest using `/next-feature`
+- If verification steps exist, they should have been tested
+- The completion event is recorded in the graph for analytics
+- Summary is important for session continuity
+
+## Example Flow
+
+```
+User: /complete-feature Implemented OAuth flow with Google and GitHub providers
+
+Claude:
+## Feature Completed
+
+**Feature:** User authentication with OAuth
+**Summary:** Implemented OAuth flow with Google and GitHub providers
+
+### Progress
+- Completed: 6/12 features (50%)
+- Next up: [security] Input validation and sanitization
+
+### Suggested Actions
+- Run `/next-feature` to continue with input validation
+- You have uncommitted changes. Create a commit?
+```

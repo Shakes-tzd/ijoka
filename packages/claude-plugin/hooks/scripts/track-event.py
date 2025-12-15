@@ -14,11 +14,221 @@ Links events to the active feature.
 import json
 import os
 import sys
+import re
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
-# Import shared database helper
+# Import shared helpers
 sys.path.insert(0, str(Path(__file__).parent))
 import graph_db_helper as db_helper
+from git_utils import resolve_project_path
+
+# Import semantic analyzer for intelligent observability
+try:
+    import semantic_analyzer
+    SEMANTIC_ANALYSIS_ENABLED = True
+except ImportError:
+    SEMANTIC_ANALYSIS_ENABLED = False
+
+# Background shell cache for linking BashOutput to original commands
+SHELL_CACHE_FILE = Path.home() / ".ijoka" / "background_shells.json"
+
+
+# =============================================================================
+# Stuckness Detection Functions
+# =============================================================================
+
+def detect_stuckness(session_id: str, feature_id: str, active_step: dict | None) -> tuple[bool, str]:
+    """
+    Detect if the agent is stuck.
+    Returns (is_stuck, reason).
+    """
+    reasons = []
+
+    # 1. Time since last meaningful progress
+    last_progress = db_helper.get_last_meaningful_event(session_id)
+    if last_progress:
+        # Parse timestamp and calculate minutes since
+        try:
+            # Handle different timestamp formats from neo4j
+            timestamp = last_progress.get("timestamp")
+            if timestamp:
+                if hasattr(timestamp, 'to_native'):
+                    last_time = timestamp.to_native()
+                else:
+                    last_time = datetime.fromisoformat(str(timestamp).replace('Z', '+00:00'))
+
+                now = datetime.now(timezone.utc)
+                minutes_since = (now - last_time).total_seconds() / 60
+
+                if minutes_since > 5:
+                    return True, f"No file changes for {int(minutes_since)} minutes"
+                elif minutes_since > 3:
+                    reasons.append(f"Slow progress ({int(minutes_since)} min since last change)")
+        except Exception:
+            pass  # Timestamp parsing failed, skip this check
+
+    # 2. Repeated tool patterns (loops)
+    recent_events = db_helper.get_recent_tool_patterns(session_id)
+    pattern = db_helper.find_repeated_patterns(recent_events)
+    if pattern and pattern.get("count", 0) >= 4:
+        return True, f"Possible loop: {pattern.get('description', 'repeated tools')}"
+    elif pattern and pattern.get("count", 0) >= 3:
+        reasons.append(f"Repetitive pattern: {pattern.get('tool', '')} x{pattern.get('count', 0)}")
+
+    # 3. Step stuck (in_progress for too long with little activity)
+    if active_step:
+        step_stats = db_helper.get_step_duration_stats(active_step.get("id", ""))
+        minutes_active = step_stats.get("minutes_active", 0)
+        event_count = step_stats.get("event_count", 0)
+
+        # Step active for >15 min with <5 events = likely stuck
+        if minutes_active > 15 and event_count < 5:
+            return True, f"Step stalled: {minutes_active} min with only {event_count} events"
+        # Step active for >10 min with <3 events = possibly stuck
+        elif minutes_active > 10 and event_count < 3:
+            reasons.append(f"Step slow: {minutes_active} min, {event_count} events")
+
+    # If we have multiple warning signs but no definitive stuckness
+    if len(reasons) >= 2:
+        return True, "; ".join(reasons)
+
+    return False, ""
+
+
+def generate_stuckness_warning(reason: str) -> str:
+    """Generate a user-friendly stuckness warning message."""
+    return (
+        f"You may be stuck: {reason}. "
+        "Consider: What are you trying to accomplish? "
+        "What's the next concrete step?"
+    )
+
+
+def get_shell_cache() -> dict:
+    """Load the background shell cache."""
+    try:
+        if SHELL_CACHE_FILE.exists():
+            with open(SHELL_CACHE_FILE, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def save_shell_cache(cache: dict):
+    """Save the background shell cache."""
+    try:
+        SHELL_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(SHELL_CACHE_FILE, 'w') as f:
+            json.dump(cache, f)
+    except Exception:
+        pass
+
+
+def cache_background_shell(bash_id: str, command: str, description: str):
+    """Cache a background shell's command info."""
+    cache = get_shell_cache()
+    cache[bash_id] = {
+        "command": command,
+        "description": description
+    }
+    # Keep cache size reasonable (last 50 shells)
+    if len(cache) > 50:
+        keys = list(cache.keys())
+        for key in keys[:-50]:
+            del cache[key]
+    save_shell_cache(cache)
+
+
+def get_cached_shell(bash_id: str) -> dict:
+    """Get cached shell info by bash_id."""
+    cache = get_shell_cache()
+    return cache.get(bash_id, {})
+
+
+# =============================================================================
+# Drift Detection Functions
+# =============================================================================
+
+def extract_keywords(text: str) -> set[str]:
+    """Extract meaningful keywords from text for comparison."""
+    if not text:
+        return set()
+    stop_words = {
+        'the', 'a', 'an', 'is', 'are', 'to', 'of', 'in', 'for', 'on', 'with',
+        'and', 'or', 'not', 'this', 'that', 'it', 'be', 'as', 'at', 'by',
+        'from', 'has', 'have', 'had', 'do', 'does', 'did', 'will', 'would',
+        'could', 'should', 'may', 'might', 'must', 'shall', 'can'
+    }
+    words = re.findall(r'\b[a-zA-Z][a-zA-Z0-9_]{2,}\b', text.lower())
+    return {w for w in words if w not in stop_words}
+
+
+def calculate_drift(step: dict, tool_name: str, tool_input: dict, payload: dict) -> tuple[float, str]:
+    """
+    Calculate drift score between current activity and expected step work.
+    Returns (score, reason) where score is 0.0 (aligned) to 1.0 (drifted).
+    """
+    if not step:
+        return 0.0, "no_step"
+
+    score = 0.0
+    reasons = []
+
+    step_desc = step.get("description", "").lower()
+    expected_tools = step.get("expected_tools") or []
+    file_paths = payload.get("filePaths", [])
+
+    # 1. Tool alignment (0.3 weight)
+    exploration_tools = {"Read", "Glob", "Grep", "WebSearch", "WebFetch"}
+    if expected_tools and tool_name not in expected_tools:
+        if tool_name not in exploration_tools:
+            score += 0.3
+            reasons.append(f"tool:{tool_name} not expected")
+
+    # 2. File/content alignment (0.4 weight)
+    step_keywords = extract_keywords(step_desc)
+    activity_text = " ".join(str(p) for p in file_paths)
+    if tool_input.get("command"):
+        activity_text += " " + tool_input.get("command", "")
+    if tool_input.get("pattern"):
+        activity_text += " " + tool_input.get("pattern", "")
+    activity_keywords = extract_keywords(activity_text)
+
+    if step_keywords and activity_keywords:
+        overlap = len(step_keywords & activity_keywords)
+        total = max(len(step_keywords), 1)
+        if overlap / total < 0.1:
+            score += 0.4
+            reasons.append(f"files unrelated (overlap: {overlap}/{total})")
+        elif overlap / total < 0.2:
+            score += 0.2
+            reasons.append(f"weak alignment ({overlap}/{total})")
+
+    # 3. Sustained drift (0.3 weight)
+    step_id = step.get("id")
+    if step_id:
+        recent_count = db_helper.count_unrelated_events(step_id)
+        if recent_count >= 5:
+            score += 0.3
+            reasons.append(f"sustained ({recent_count} events)")
+        elif recent_count >= 3:
+            score += 0.15
+            reasons.append(f"pattern ({recent_count} events)")
+
+    return min(score, 1.0), "; ".join(reasons) if reasons else "aligned"
+
+
+def generate_drift_warning(step: dict, drift_score: float, drift_reason: str) -> str:
+    """Generate user-friendly drift warning message."""
+    step_desc = step.get("description", "Unknown")[:50]
+    if drift_score >= 0.7:
+        return f"Drift: Your recent actions don't align with the current step: '{step_desc}'. ({drift_reason}). Consider updating your plan or refocusing on the step."
+    elif drift_score >= 0.5:
+        return f"Note: Possible drift from step '{step_desc}'. Are you still working on this step?"
+    return ""
 
 
 def extract_file_paths(tool_input: dict) -> list[str]:
@@ -81,7 +291,7 @@ def check_completion_criteria(
     criteria = feature.get("completionCriteria") or {}
     criteria_type = criteria.get("type", "manual")
 
-    is_error = tool_result.get("is_error", False)
+    is_error = safe_get_result(tool_result, "is_error", False)
     if is_error:
         return False, ""
 
@@ -130,7 +340,7 @@ def maybe_auto_complete(
 
     feature_id = active_feature["id"]
     is_work_tool = tool_name in {"Edit", "Write", "Bash", "Task"}
-    is_error = tool_result.get("is_error", False)
+    is_error = safe_get_result(tool_result, "is_error", False)
 
     # Increment work count for successful work tools
     if is_work_tool and not is_error:
@@ -169,15 +379,89 @@ def _activate_next_feature(project_dir: str) -> str | None:
     return None
 
 
+def extract_activity_keywords(tool_name: str, tool_input: dict) -> set[str]:
+    """
+    Extract keywords from tool activity (files, commands, patterns).
+    Used to compare against feature description keywords.
+    """
+    activity_text = ""
+
+    # Extract text based on tool type
+    if tool_name == "Read":
+        activity_text = tool_input.get("file_path", "")
+    elif tool_name == "Write":
+        activity_text = tool_input.get("file_path", "")
+    elif tool_name == "Edit":
+        activity_text = tool_input.get("file_path", "")
+    elif tool_name == "Bash":
+        activity_text = tool_input.get("command", "")
+    elif tool_name == "Glob":
+        activity_text = tool_input.get("pattern", "")
+    elif tool_name == "Grep":
+        activity_text = tool_input.get("pattern", "") + " " + tool_input.get("path", "")
+    elif tool_name == "Task":
+        activity_text = tool_input.get("description", "")
+    elif tool_name.startswith("mcp__ijoka__"):
+        # MCP ijoka tools - extract description if present
+        activity_text = tool_input.get("description", "")
+
+    # Extract keywords from the combined activity text
+    return extract_keywords(activity_text)
+
+
+def calculate_feature_alignment(feature: dict, tool_name: str, tool_input: dict) -> tuple[float, str]:
+    """
+    Calculate alignment score between current activity and active feature.
+    Works WITHOUT Steps, using feature description keywords to score alignment.
+    Returns (score, reason) where score is 0.0 (perfectly aligned) to 1.0 (misaligned).
+
+    This is a fallback mechanism when get_active_step() returns None.
+    """
+    # Can't judge drift without a feature or for Session Work features
+    if not feature or feature.get("is_session_work"):
+        return 1.0, "no_feature"
+
+    # Extract keywords from feature description
+    feature_keywords = extract_keywords(feature.get("description", ""))
+
+    if not feature_keywords:
+        # No keywords to judge by - assume aligned
+        return 1.0, "no_keywords"
+
+    # Extract keywords from current activity
+    activity_keywords = extract_activity_keywords(tool_name, tool_input)
+
+    if not activity_keywords:
+        # No activity keywords - can't judge alignment
+        return 1.0, "no_activity_keywords"
+
+    # Calculate overlap
+    overlap = len(feature_keywords & activity_keywords)
+    total = len(feature_keywords)
+    overlap_ratio = overlap / total if total > 0 else 0
+
+    # Score based on overlap ratio (0.3 threshold = 30% of feature keywords should appear in activity)
+    if overlap_ratio >= 0.3:
+        return 0.0, "aligned"
+    elif overlap_ratio >= 0.1:
+        return 0.7, f"weak_alignment ({overlap}/{total})"
+    else:
+        return 0.4, f"low_alignment ({overlap}/{total})"
+
+
 def is_mcp_meta_tool(tool_name: str) -> bool:
-    """Check if a tool call is an MCP ijoka meta tool (feature/project management)."""
-    # MCP tools follow the pattern: mcp__<server>__<tool_name>
+    """Check if a tool call is an ijoka meta tool (feature/project management).
+
+    Note: MCP server has been deprecated, but this function is kept for
+    backwards compatibility with historical event data.
+    """
+    # Legacy MCP tools followed the pattern: mcp__<server>__<tool_name>
     return tool_name.startswith("mcp__ijoka__")
 
 
 def is_diagnostic_command(tool_name: str, tool_input: dict) -> bool:
     """Check if a tool call is a diagnostic/meta command that shouldn't be feature-attributed."""
-    # MCP ijoka tools are meta/management tools
+    # Legacy MCP ijoka tools are meta/management tools (kept for backwards compatibility)
     if is_mcp_meta_tool(tool_name):
         return True
 
@@ -206,11 +490,15 @@ def generate_workflow_nudges(
     tool_result: dict,
     project_dir: str,
     session_id: str,
-    active_feature: dict | None
+    active_feature: dict | None,
+    payload: dict | None = None,
+    active_step: dict | None = None
 ) -> list[str]:
     """
     Generate workflow nudges based on current work patterns.
     Returns list of nudge messages to include in hook response.
+
+    Now includes intelligent semantic analysis for Edit/Write tools.
     """
     nudges = []
 
@@ -218,8 +506,56 @@ def generate_workflow_nudges(
     if is_mcp_meta_tool(tool_name) or is_diagnostic_command(tool_name, tool_input):
         return nudges
 
-    # 1. Commit frequency nudge (after 5+ file changes)
-    if tool_name in ("Edit", "Write"):
+    # 1. Intelligent semantic analysis for Edit/Write (if enabled)
+    if SEMANTIC_ANALYSIS_ENABLED and tool_name in ("Edit", "Write"):
+        try:
+            feature_desc = active_feature.get("description") if active_feature else None
+            analysis_result = semantic_analyzer.analyze_for_checkpoint(
+                tool_name=tool_name,
+                tool_input=tool_input,
+                feature_description=feature_desc
+            )
+
+            # Auto-checkpoint when logical unit detected
+            if analysis_result.get("should_checkpoint") and active_feature:
+                analysis = analysis_result.get("analysis", {})
+                summary = analysis.get("summary", "Progress checkpoint")
+                try:
+                    # Call ijoka checkpoint via CLI (non-blocking)
+                    import subprocess
+                    subprocess.Popen(
+                        ["ijoka", "checkpoint", "--activity", summary],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                except Exception:
+                    pass  # Don't fail if checkpoint fails
+
+            # Intelligent commit suggestion
+            if analysis_result.get("should_suggest_commit"):
+                commit_reason = analysis_result.get("commit_reason", "")
+                commit_msg = analysis_result.get("commit_message", "")
+                nudge_key = f"semantic_commit_{hash(commit_reason) % 10000}"
+
+                if not db_helper.has_been_nudged(session_id, nudge_key):
+                    if commit_msg:
+                        nudges.append(f"💡 {commit_reason}. Suggested: `git commit -m \"{commit_msg}\"`")
+                    else:
+                        nudges.append(f"💡 {commit_reason}. Consider committing your progress.")
+                    db_helper.record_nudge(session_id, nudge_key)
+
+                    # Clear logical units after suggesting commit
+                    semantic_analyzer.clear_logical_units()
+
+        except Exception as e:
+            # Log but don't fail
+            debug_log = Path.home() / ".ijoka" / "hook_debug.log"
+            with open(debug_log, "a") as f:
+                f.write(f"Semantic analysis error: {e}\n")
+
+    # 2. Fallback: Simple commit frequency nudge (after 5+ file changes)
+    # Only if semantic analysis didn't already suggest a commit
+    if tool_name in ("Edit", "Write") and not any("commit" in n.lower() for n in nudges):
         try:
             work_stats = db_helper.get_work_since_last_commit(session_id, project_dir)
             if work_stats["work_count"] >= 5 and not db_helper.has_been_nudged(session_id, "commit_reminder"):
@@ -231,7 +567,7 @@ def generate_workflow_nudges(
     # 2. Feature completion nudge (after successful test/build)
     if tool_name == "Bash" and active_feature:
         cmd = tool_input.get("command", "").lower()
-        is_error = tool_result.get("is_error", False)
+        is_error = safe_get_result(tool_result, "is_error", False)
 
         is_test_or_build = any(x in cmd for x in ["test", "pytest", "jest", "vitest", "build", "cargo build", "pnpm build"])
 
@@ -241,7 +577,167 @@ def generate_workflow_nudges(
                 nudges.append(f"✅ Tests/build passed! If '{desc}...' is complete, use `ijoka_complete_feature`.")
                 db_helper.record_nudge(session_id, "feature_completion")
 
+    # 3. Drift warning (when drift score >= 0.7)
+    if payload:
+        drift_score = payload.get("driftScore", 0.0)
+        drift_reason = payload.get("driftReason", "")
+
+        if drift_score >= 0.7:
+            if active_step:
+                # Step-level drift warning
+                nudge_key = f"drift_warning_{active_step.get('id', 'unknown')}"
+                if not db_helper.has_been_nudged(session_id, nudge_key):
+                    warning = generate_drift_warning(active_step, drift_score, drift_reason)
+                    if warning:
+                        nudges.append(warning)
+                        db_helper.record_nudge(session_id, nudge_key)
+            elif active_feature and not active_feature.get("is_session_work"):
+                # Feature-level alignment warning (no steps)
+                nudge_key = f"drift_warning_feature_{active_feature.get('id', 'unknown')}"
+                if not db_helper.has_been_nudged(session_id, nudge_key):
+                    feature_desc = active_feature.get("description", "current feature")[:50]
+                    nudges.append(
+                        f"⚠️ Low alignment ({drift_reason}): Current activity may not relate to '{feature_desc}...'. "
+                        "Consider checking if you're working on the right feature."
+                    )
+                    db_helper.record_nudge(session_id, nudge_key)
+
+    # 4. Session Work accumulator alert (when >20 events unattributed to real features)
+    try:
+        session_work_count = db_helper.get_session_work_event_count(project_dir, session_id)
+        if session_work_count > 20:
+            if not db_helper.has_been_nudged(session_id, "session_work_accumulator"):
+                nudges.append(
+                    f"Note: {session_work_count} events in this session aren't linked to a feature. "
+                    "Consider using ijoka_create_feature to create a feature for this work."
+                )
+                db_helper.record_nudge(session_id, "session_work_accumulator")
+    except Exception:
+        pass  # Don't fail the hook for nudge errors
+
     return nudges
+
+
+def safe_get_result(tool_result, key: str, default=None):
+    """Safely get a value from tool_result, handling both dict and list cases."""
+    if isinstance(tool_result, dict):
+        return tool_result.get(key, default)
+    elif isinstance(tool_result, list):
+        # For list results, we can't get specific keys - return default
+        return default
+    return default
+
+
+def handle_todowrite(hook_input: dict, project_dir: str, session_id: str) -> list[str]:
+    """
+    Handle TodoWrite tool calls - sync todos to Step nodes.
+    Returns any workflow nudges.
+    """
+    tool_input = hook_input.get("tool_input", {})
+    todos = tool_input.get("todos", [])
+
+    print(f"[DEBUG] handle_todowrite: received {len(todos)} todos")
+
+    if not todos:
+        print(f"[DEBUG] handle_todowrite: no todos provided, skipping")
+        return []
+
+    # Get active feature
+    active_feature = db_helper.get_active_feature(project_dir)
+    if not active_feature:
+        # No active feature - could auto-create one from todos
+        # For now, just skip
+        print(f"[DEBUG] handle_todowrite: no active feature found, skipping")
+        return []
+
+    feature_id = active_feature["id"]
+    print(f"[DEBUG] handle_todowrite: syncing todos to feature {feature_id}")
+
+    # Sync todos to Steps
+    step_ids = db_helper.sync_steps_from_todos(feature_id, todos)
+    print(f"[DEBUG] handle_todowrite: sync_steps_from_todos returned {len(step_ids)} step IDs: {step_ids}")
+
+    # Verify Steps were created by querying the database
+    try:
+        created_steps = db_helper.get_steps(feature_id)
+        print(f"[DEBUG] handle_todowrite: verification - found {len(created_steps)} total steps in database for feature {feature_id}")
+        for step in created_steps:
+            print(f"[DEBUG]   Step: id={step.get('id')}, desc='{step.get('description', '')[:50]}...', status={step.get('status')}")
+    except Exception as e:
+        print(f"[ERROR] handle_todowrite: verification failed - {str(e)}")
+
+    # Record PlanUpdate event
+    payload = {
+        "todoCount": len(todos),
+        "stepIds": step_ids,
+        "featureDescription": active_feature.get("description", ""),
+        "todos": [{"content": t.get("content", ""), "status": t.get("status", "")} for t in todos[:10]]  # Limit payload size
+    }
+
+    # Create summary of plan state
+    pending = sum(1 for t in todos if t.get("status") == "pending")
+    in_progress = sum(1 for t in todos if t.get("status") == "in_progress")
+    completed = sum(1 for t in todos if t.get("status") == "completed")
+
+    summary = f"Plan updated: {completed}/{len(todos)} complete, {in_progress} in progress"
+
+    db_helper.insert_event(
+        event_type="PlanUpdate",
+        source_agent="claude-code",
+        session_id=session_id,
+        project_dir=project_dir,
+        tool_name="TodoWrite",
+        payload=payload,
+        feature_id=feature_id,
+        success=True,
+        summary=summary
+    )
+
+    return []
+
+
+def detect_git_commit(tool_name: str, tool_input: str, tool_output: str) -> Optional[dict]:
+    """Detect git commit from Bash tool call."""
+    if tool_name != "Bash":
+        return None
+
+    # Convert tool_input to string if it's a dict
+    tool_input_str = str(tool_input)
+    tool_output_str = str(tool_output)
+
+    if "git commit" not in tool_input_str:
+        return None
+
+    # Parse commit hash from output: [branch_name abc1234] Message
+    hash_pattern = r'\[[\w/-]+ (?:\(root-commit\) )?([a-f0-9]{7,})\]'
+    match = re.search(hash_pattern, tool_output_str)
+
+    if not match:
+        return None
+
+    commit_hash = match.group(1)
+
+    # Extract message
+    msg_pattern = r'\[[^\]]+\] (.+?)(?:\n|$)'
+    msg_match = re.search(msg_pattern, tool_output_str)
+    message = msg_match.group(1) if msg_match else "No message"
+
+    return {"hash": commit_hash, "message": message[:200]}
+
+
+def handle_git_commit(commit_info: dict, session_id: str, active_feature_id: Optional[str]):
+    """Create Commit node and link to session/feature."""
+    try:
+        db_helper.insert_commit(commit_info["hash"], commit_info["message"])
+        db_helper.link_commit_to_session(commit_info["hash"], session_id)
+
+        if active_feature_id:
+            db_helper.link_commit_to_feature(commit_info["hash"], active_feature_id)
+    except Exception as e:
+        # Log error but don't fail the hook
+        debug_log = Path.home() / ".ijoka" / "hook_debug.log"
+        with open(debug_log, "a") as f:
+            f.write(f"Error handling git commit: {e}\n")
 
 
 def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) -> list[str]:
@@ -250,6 +746,33 @@ def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) ->
     tool_input = hook_input.get("tool_input", {})
     # Claude Code uses "tool_response", manual tests use "tool_result"
     tool_result = hook_input.get("tool_response") or hook_input.get("tool_result", {})
+    # Use tool_use_id as event_id for deduplication
+    tool_use_id = hook_input.get("tool_use_id")
+
+    # Special handling for TodoWrite - capture plan structure
+    if tool_name == "TodoWrite":
+        return handle_todowrite(hook_input, project_dir, session_id)
+
+    # Detect git commits in Bash tool calls
+    if tool_name == "Bash":
+        tool_output = safe_get_result(tool_result, "output", "") or str(tool_result)
+        commit_info = detect_git_commit(tool_name, tool_input, tool_output)
+        if commit_info:
+            # Smart attribution for commit linking
+            commit_features = db_helper.get_active_features(project_dir)
+            if len(commit_features) > 1:
+                # Use commit message for attribution context
+                commit_feature, _, _ = db_helper.score_attribution(
+                    features=commit_features,
+                    tool_name="Bash",
+                    tool_input={"command": commit_info.get("message", "")}
+                )
+                commit_feature_id = commit_feature["id"] if commit_feature else None
+            elif commit_features:
+                commit_feature_id = commit_features[0]["id"]
+            else:
+                commit_feature_id = None
+            handle_git_commit(commit_info, session_id, commit_feature_id)
 
     # Skip tracking the tracking script itself
     if "track-event.py" in str(tool_input) or "db_helper" in str(tool_input):
@@ -260,6 +783,7 @@ def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) ->
     is_meta_tool = is_mcp_meta_tool(tool_name)
 
     # Get the appropriate feature for this activity
+    attribution_reason = None
     if is_meta_tool:
         # MCP ijoka tools go to the Session Work pseudo-feature
         active_feature = db_helper.get_or_create_session_work_feature(project_dir)
@@ -267,14 +791,30 @@ def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) ->
         # Other diagnostic commands don't get attributed to any feature
         active_feature = None
     else:
-        # Normal tools get attributed to the active feature
-        active_feature = db_helper.get_active_feature(project_dir)
+        # Smart attribution: get ALL active features and score for best match
+        active_features = db_helper.get_active_features(project_dir)
+
+        if len(active_features) > 1:
+            # Multiple features in progress - use scoring to determine attribution
+            file_path = tool_input.get("file_path", "")
+            active_feature, score, attribution_reason = db_helper.score_attribution(
+                features=active_features,
+                file_path=file_path,
+                tool_name=tool_name,
+                tool_input=tool_input
+            )
+        elif active_features:
+            # Single active feature - use it directly
+            active_feature = active_features[0]
+        else:
+            # No active features
+            active_feature = None
 
     # Build detailed payload based on tool type
     payload = {
         "filePaths": extract_file_paths(tool_input),
         "inputSummary": summarize_input(tool_name, tool_input),
-        "success": not tool_result.get("is_error", False),
+        "success": not safe_get_result(tool_result, "is_error", False),
         "isDiagnostic": is_diagnostic,
         "isMetaTool": is_meta_tool
     }
@@ -284,12 +824,50 @@ def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) ->
         payload["oldString"] = (tool_input.get("old_string", "")[:200] + "...") if len(tool_input.get("old_string", "")) > 200 else tool_input.get("old_string", "")
         payload["newString"] = (tool_input.get("new_string", "")[:200] + "...") if len(tool_input.get("new_string", "")) > 200 else tool_input.get("new_string", "")
         payload["filePath"] = tool_input.get("file_path", "")
+        # Extract line numbers from the Edit response
+        # Claude Code Edit responses typically include line info like "line 1455" or "lines 1455-1488"
+        import re
+        result_output = ""
+        if tool_result:
+            # tool_result can be dict with "output" key, or direct string/content
+            if isinstance(tool_result, dict):
+                result_output = tool_result.get("output", "") or tool_result.get("result", "") or ""
+            elif isinstance(tool_result, str):
+                result_output = tool_result
+            elif isinstance(tool_result, list):
+                # Sometimes response is a list of content blocks
+                result_output = " ".join(str(item) for item in tool_result)
+        # Extract line numbers from the "cat -n" output in Edit response
+        # Format is like "  1234→line content" where 1234 is the line number
+        line_matches = re.findall(r'^\s*(\d+)→', result_output, re.MULTILINE)
+        if line_matches:
+            # Get first and last line numbers from the snippet
+            line_nums = [int(ln) for ln in line_matches]
+            payload["startLine"] = min(line_nums)
+            payload["endLine"] = max(line_nums)
     elif tool_name == "Bash":
         payload["command"] = tool_input.get("command", "")[:500]
         payload["description"] = tool_input.get("description", "")
-        output = tool_result.get("output", "")
+        output = safe_get_result(tool_result, "output", "")
         if output:
             payload["outputPreview"] = (output[:300] + "...") if len(output) > 300 else output
+        # Cache background shell info for later BashOutput lookups
+        # Background shells have run_in_background=true and return a bash_id
+        if tool_input.get("run_in_background"):
+            # Extract bash_id from response - format varies
+            bash_id = safe_get_result(tool_result, "bash_id", "")
+            if not bash_id:
+                # Try extracting from output text like "Background shell started with id: abc123"
+                import re
+                id_match = re.search(r'id[:\s]+([a-f0-9]+)', output or "", re.IGNORECASE)
+                if id_match:
+                    bash_id = id_match.group(1)
+            if bash_id:
+                cache_background_shell(
+                    bash_id,
+                    tool_input.get("command", ""),
+                    tool_input.get("description", "")
+                )
     elif tool_name == "Read":
         payload["filePath"] = tool_input.get("file_path", "")
         payload["offset"] = tool_input.get("offset")
@@ -305,19 +883,62 @@ def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) ->
     elif tool_name == "Glob":
         payload["pattern"] = tool_input.get("pattern", "")
         payload["path"] = tool_input.get("path", "")
+    elif tool_name == "BashOutput":
+        bash_id = tool_input.get("bash_id", "")
+        payload["bash_id"] = bash_id
+        # Look up cached shell info to get original command context
+        shell_info = get_cached_shell(bash_id)
+        if shell_info:
+            payload["originalCommand"] = shell_info.get("command", "")
+            payload["commandDescription"] = shell_info.get("description", "")
+    elif tool_name == "KillShell":
+        payload["shell_id"] = tool_input.get("shell_id", "")
 
     # Add feature context if available
     feature_id = None
     if active_feature:
         feature_id = active_feature["id"]
-        payload["featureCategory"] = active_feature["category"]
-        payload["featureDescription"] = active_feature["description"]
+        payload["featureCategory"] = active_feature.get("category", "")
+        payload["featureDescription"] = active_feature.get("description", "")
+        payload["featureType"] = active_feature.get("type", "feature")
+        payload["featureIsPrimary"] = active_feature.get("is_primary", False)
+        if attribution_reason:
+            payload["attributionReason"] = attribution_reason
+
+    # Get active step for step-level tracking
+    step_id = None
+    active_step = None
+    if active_feature and not is_diagnostic:
+        active_step = db_helper.get_active_step(active_feature["id"])
+        if active_step:
+            step_id = active_step["id"]
+
+    # Add step context to payload
+    if active_step:
+        payload["stepDescription"] = active_step.get("description", "")
+        payload["stepOrder"] = active_step.get("step_order", 0)
+
+    # Calculate drift score
+    drift_score = 0.0
+    drift_reason = ""
+    if not is_diagnostic:
+        if active_step:
+            # Step-level drift detection (precise)
+            drift_score, drift_reason = calculate_drift(active_step, tool_name, tool_input, payload)
+        elif active_feature and not active_feature.get("is_session_work"):
+            # Feature-level alignment fallback (when no Steps exist)
+            drift_score, drift_reason = calculate_feature_alignment(active_feature, tool_name, tool_input)
+
+        if drift_score > 0:
+            payload["driftScore"] = drift_score
+        if drift_score > 0.3:
+            payload["driftReason"] = drift_reason
 
     # Extract success status and summary for top-level Event fields
-    is_success = not tool_result.get("is_error", False)
+    is_success = not safe_get_result(tool_result, "is_error", False)
     summary = summarize_input(tool_name, tool_input)
 
-    # Insert event into database
+    # Insert event into database (use tool_use_id for deduplication)
     db_helper.insert_event(
         event_type="ToolCall",
         source_agent="claude-code",
@@ -326,8 +947,10 @@ def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) ->
         tool_name=tool_name,
         payload=payload,
         feature_id=feature_id,
+        step_id=step_id,
         success=is_success,
-        summary=summary
+        summary=summary,
+        event_id=tool_use_id
     )
 
     # Update session activity
@@ -358,7 +981,8 @@ def handle_post_tool_use(hook_input: dict, project_dir: str, session_id: str) ->
     # Generate workflow nudges
     nudges = generate_workflow_nudges(
         tool_name, tool_input, tool_result,
-        project_dir, session_id, active_feature
+        project_dir, session_id, active_feature,
+        payload=payload, active_step=active_step
     )
     return nudges
 
@@ -373,6 +997,7 @@ def handle_stop(hook_input: dict, project_dir: str, session_id: str):
         "lastMessage": (stop_hook_input.get("last_assistant_message", "") or "")[:200]
     }
 
+    # Use session_id + event_type for deduplication (only one Stop per session)
     db_helper.insert_event(
         event_type="AgentStop",
         source_agent="claude-code",
@@ -380,7 +1005,8 @@ def handle_stop(hook_input: dict, project_dir: str, session_id: str):
         project_dir=project_dir,
         payload=payload,
         success=True,
-        summary=f"Agent stopped: {stop_reason}"
+        summary=f"Agent stopped: {stop_reason}",
+        event_id=f"{session_id}-AgentStop"
     )
 
 
@@ -390,10 +1016,22 @@ def handle_subagent_stop(hook_input: dict, project_dir: str, session_id: str):
     # Claude Code uses "tool_response", manual tests use "tool_result"
     tool_result = hook_input.get("tool_response") or hook_input.get("tool_result", {})
 
-    active_feature = db_helper.get_active_feature(project_dir)
+    # Smart attribution for subagent events
+    active_features = db_helper.get_active_features(project_dir)
+    if len(active_features) > 1:
+        # Use task description for attribution context
+        active_feature, _, _ = db_helper.score_attribution(
+            features=active_features,
+            tool_name="Task",
+            tool_input=tool_input
+        )
+    elif active_features:
+        active_feature = active_features[0]
+    else:
+        active_feature = None
     feature_id = active_feature["id"] if active_feature else None
 
-    is_success = not tool_result.get("is_error", False)
+    is_success = not safe_get_result(tool_result, "is_error", False)
     task_desc = tool_input.get("description", "unknown task")
     subagent_type = tool_input.get("subagent_type", "")
 
@@ -401,7 +1039,7 @@ def handle_subagent_stop(hook_input: dict, project_dir: str, session_id: str):
         "taskDescription": task_desc,
         "subagentType": subagent_type,
         "success": is_success,
-        "resultSummary": (str(tool_result.get("output", ""))[:200] if tool_result else "")
+        "resultSummary": (str(safe_get_result(tool_result, "output", ""))[:200] if tool_result else "")
     }
 
     if active_feature:
@@ -545,6 +1183,11 @@ def handle_user_prompt_submit(hook_input: dict, project_dir: str, session_id: st
     # Create a short summary for the event
     prompt_preview = user_prompt[:50] + "..." if len(user_prompt) > 50 else user_prompt
 
+    # Generate unique event ID based on session + prompt hash for deduplication
+    import hashlib
+    prompt_hash = hashlib.md5(user_prompt.encode()).hexdigest()[:8]
+    event_id = f"{session_id}-UserQuery-{prompt_hash}"
+
     db_helper.insert_event(
         event_type="UserQuery",
         source_agent="claude-code",
@@ -553,7 +1196,8 @@ def handle_user_prompt_submit(hook_input: dict, project_dir: str, session_id: st
         payload=payload,
         feature_id=feature_id,
         success=True,
-        summary=f"User: {prompt_preview}"
+        summary=f"User: {prompt_preview}",
+        event_id=event_id
     )
 
 
@@ -568,11 +1212,13 @@ def main():
 
     # Debug: log the hook input to see what session_id we're getting
     import sys as _sys
+    import traceback as _tb
     debug_log = Path.home() / ".ijoka" / "hook_debug.log"
     with open(debug_log, "a") as f:
         f.write(f"\n=== {hook_type} at {__import__('datetime').datetime.now()} ===\n")
         f.write(f"hook_input keys: {list(hook_input.keys())}\n")
         f.write(f"session_id from input: {hook_input.get('session_id')}\n")
+        f.write(f"cwd from input: {hook_input.get('cwd')}\n")
         f.write(f"CLAUDE_SESSION_ID env: {os.environ.get('CLAUDE_SESSION_ID')}\n")
         if hook_type == "PostToolUse":
             tool_name = hook_input.get("tool_name", "unknown")
@@ -580,23 +1226,16 @@ def main():
             f.write(f"is_mcp_meta_tool: {is_mcp_meta_tool(tool_name)}\n")
 
     session_id = hook_input.get("session_id") or os.environ.get("CLAUDE_SESSION_ID", "unknown")
-    # Claude Code provides 'cwd' in hook_input; fall back to env var or detection
-    project_dir = hook_input.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR", "")
 
-    if not project_dir:
-        # Try to detect project from file path by looking for common project markers
-        tool_input = hook_input.get("tool_input", {})
-        file_path = tool_input.get("file_path", "")
-        if file_path:
-            path = Path(file_path)
-            for parent in [path] + list(path.parents):
-                # Check for common project markers (git, package.json, Cargo.toml, etc.)
-                if any((parent / marker).exists() for marker in [".git", "package.json", "Cargo.toml", "pyproject.toml", "CLAUDE.md"]):
-                    project_dir = str(parent)
-                    break
-
-    if not project_dir:
-        project_dir = os.getcwd()
+    # Resolve project path using git-aware resolution
+    # In Ijoka, PROJECT = GIT REPOSITORY - all subdirectories belong to the same project
+    tool_input = hook_input.get("tool_input", {})
+    file_path = tool_input.get("file_path", "")
+    project_dir = resolve_project_path(
+        cwd=hook_input.get("cwd"),
+        file_path=file_path,
+        env_var=os.environ.get("CLAUDE_PROJECT_DIR")
+    )
 
     # Route to appropriate handler and collect nudges
     nudges = []

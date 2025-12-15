@@ -1,18 +1,25 @@
-# Classify Recent Activity
+# /classify-activity
 
-Spawn a Haiku subagent to intelligently classify recent activity and link it to the correct features.
+Spawn a Haiku subagent to intelligently classify recent unlinked activity and associate it with features.
+
+## What This Command Does
+
+Uses a cost-efficient Haiku agent to:
+1. Query Memgraph for recent events without feature links
+2. Get the list of all features from the project
+3. Intelligently match events to features based on context
+4. Update the graph to link events to their features
+
+## When to Use
+
+- When activities have been recorded without proper feature attribution
+- After switching features mid-session
+- To clean up historical data
+- When the automatic classification in hooks didn't work
 
 ## Instructions
 
-Use the Task tool to spawn a Haiku agent that will:
-
-1. Read the project's `feature_list.json` to get available features
-2. Query Ijoka for recent unlinked events (last 20 events without feature_id)
-3. For each unlinked event, determine the best matching feature based on:
-   - Tool name and input (file paths, commands, patterns)
-   - Semantic meaning of the work being done
-   - Feature descriptions and steps
-4. Update the feature links via the Ijoka API
+Use the Task tool to spawn a Haiku agent:
 
 ```
 Task tool parameters:
@@ -21,18 +28,26 @@ Task tool parameters:
 - prompt: |
     You are a feature classifier for the Ijoka observability system.
 
+    IMPORTANT: Use ijoka CLI commands for all operations. Never call Python scripts directly.
+
     Your task:
-    1. Read feature_list.json from the current project directory
-    2. Fetch recent events from http://127.0.0.1:4000/events?limit=20&unlinked=true
-    3. For each event, analyze the tool_name and payload to determine which feature it relates to
-    4. Update the event's feature_id via POST http://127.0.0.1:4000/events/{id}/link
+    1. Get all features: `ijoka status`
+    2. Query for recent unlinked events: `ijoka status --unlinked` (if supported)
+    3. For each unlinked event, analyze:
+       - tool_name: What tool was used (Edit, Write, Bash, etc.)
+       - payload: File paths, commands, patterns
+       - summary: Any description of what was done
+    4. Match each event to the most relevant feature:
+       - File paths indicate which part of codebase
+       - Bash commands reveal intent (test, build, deploy)
+       - Edit/Write operations show what's being changed
+    5. Create LINKED_TO relationships in the graph
 
     Classification rules:
     - Match based on semantic meaning, not just keywords
-    - File paths indicate which part of codebase is being modified
-    - Bash commands reveal intent (build, test, deploy, etc.)
-    - Edit/Write operations show what's being changed
-    - If no good match (< 30% confidence), leave unlinked
+    - Consider the feature's category and description
+    - If confidence < 30%, leave unlinked (don't guess)
+    - Prefer active feature for ambiguous cases
 
     After classification, report:
     - How many events were classified
@@ -41,3 +56,40 @@ Task tool parameters:
 ```
 
 Execute this task now.
+
+## How Classification Works
+
+The classifier analyzes events based on:
+
+| Signal | What It Indicates |
+|--------|-------------------|
+| File paths in Edit/Write | Which component/feature area |
+| `npm test`, `pytest` | Testing-related feature |
+| `git commit` | Feature completion work |
+| `docker`, `deploy` | Infrastructure feature |
+| CSS/HTML changes | UI feature |
+| SQL/database files | Data/functional feature |
+
+## Example Output
+
+```
+## Classification Results
+
+Classified 15 events:
+
+### User Authentication (5 events)
+- Edit: src/auth/login.ts
+- Edit: src/auth/oauth.ts
+- Write: src/auth/providers/google.ts
+- Bash: npm test src/auth
+- Bash: git commit -m "Add OAuth"
+
+### Dashboard Layout (3 events)
+- Edit: src/components/Dashboard.vue
+- Edit: src/styles/dashboard.css
+- Write: src/components/Sidebar.vue
+
+### Unlinked (2 events)
+- Bash: npm install (ambiguous - could be any feature)
+- Read: package.json (exploration, not specific)
+```

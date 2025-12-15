@@ -26,6 +26,9 @@ defmodule IjokaWebWeb.Router do
 
     post "/events", EventController, :create
     get "/events", EventController, :index
+    get "/features", FeatureController, :index
+    get "/stats", FeatureController, :stats
+    get "/projects", FeatureController, :projects
     get "/health", HealthController, :check
   end
 end

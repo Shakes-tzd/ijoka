@@ -35,13 +35,13 @@ importers:
         version: 2.9.5
       '@vitejs/plugin-vue':
         specifier: ^5.0.0
-        version: 5.2.4(vite@5.4.21(@types/node@20.19.25))(vue@3.5.25(typescript@5.9.3))
+        version: 5.2.4(vite@5.4.21(@types/node@22.19.2))(vue@3.5.25(typescript@5.9.3))
       typescript:
         specifier: ^5.3.0
         version: 5.9.3
       vite:
         specifier: ^5.0.0
-        version: 5.4.21(@types/node@20.19.25)
+        version: 5.4.21(@types/node@22.19.2)
       vue-tsc:
         specifier: ^2.0.0
         version: 2.2.12(typescript@5.9.3)
@@ -89,6 +89,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.0.0
         version: 1.24.3(zod@3.25.76)
+      minimatch:
+        specifier: ^10.0.1
+        version: 10.1.1
       neo4j-driver:
         specifier: ^5.27.0
         version: 5.28.2
@@ -420,6 +423,14 @@ packages:
     engines: {node: '>=18'}
     cpu: [x64]
     os: [win32]
+
+  '@isaacs/balanced-match@4.0.1':
+    resolution: {integrity: sha512-yzMTt9lEb8Gv7zRioUilSglI0c0smZ9k5D65677DLWLtWJaXIS3CqcGyUFByYKlnUj6TkjLVs54fBl6+TiGQDQ==}
+    engines: {node: 20 || >=22}
+
+  '@isaacs/brace-expansion@5.0.0':
+    resolution: {integrity: sha512-ZT55BDLV0yv0RBm2czMiZ+SqCGO7AvmOM3G/w2xhVPH+te0aKgFjmBvGlL1dH+ql2tgGO3MVrbb3jCKyvpgnxA==}
+    engines: {node: 20 || >=22}
 
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
@@ -1002,6 +1013,10 @@ packages:
     resolution: {integrity: sha512-Lbgzdk0h4juoQ9fCKXW4by0UJqj+nOOrI9MJ1sSj4nI8aI2eo1qmvQEie4VD1glsS250n15LsWsYtCugiStS5A==}
     engines: {node: '>=18'}
 
+  minimatch@10.1.1:
+    resolution: {integrity: sha512-enIvLvRAFZYXJzkCYG5RKmPfrFArdLv+R+lbQ53BmIMLIry74bjKzX6iHAm8WYamJkhSSEabrWN5D97XnKObjQ==}
+    engines: {node: 20 || >=22}
+
   minimatch@9.0.5:
     resolution: {integrity: sha512-G6T0ZX48xgozx7587koeX9Ys2NYy6Gmv//P89sEte9V9whIapMNF4idKxnW2QtCcLiTWlb/wfCabAtAFWhhBow==}
     engines: {node: '>=16 || 14 >=14.17'}
@@ -1422,6 +1437,12 @@ snapshots:
   '@esbuild/win32-x64@0.27.1':
     optional: true
 
+  '@isaacs/balanced-match@4.0.1': {}
+
+  '@isaacs/brace-expansion@5.0.0':
+    dependencies:
+      '@isaacs/balanced-match': 4.0.1
+
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
   '@modelcontextprotocol/sdk@1.24.3(zod@3.25.76)':
@@ -1582,9 +1603,9 @@ snapshots:
 
   '@types/uuid@9.0.8': {}
 
-  '@vitejs/plugin-vue@5.2.4(vite@5.4.21(@types/node@20.19.25))(vue@3.5.25(typescript@5.9.3))':
+  '@vitejs/plugin-vue@5.2.4(vite@5.4.21(@types/node@22.19.2))(vue@3.5.25(typescript@5.9.3))':
     dependencies:
-      vite: 5.4.21(@types/node@20.19.25)
+      vite: 5.4.21(@types/node@22.19.2)
       vue: 3.5.25(typescript@5.9.3)
 
   '@volar/language-core@2.4.15':
@@ -2024,6 +2045,10 @@ snapshots:
     dependencies:
       mime-db: 1.54.0
 
+  minimatch@10.1.1:
+    dependencies:
+      '@isaacs/brace-expansion': 5.0.0
+
   minimatch@9.0.5:
     dependencies:
       brace-expansion: 2.0.2
@@ -2246,13 +2271,13 @@ snapshots:
 
   vary@1.1.2: {}
 
-  vite@5.4.21(@types/node@20.19.25):
+  vite@5.4.21(@types/node@22.19.2):
     dependencies:
       esbuild: 0.21.5
       postcss: 8.5.6
       rollup: 4.53.3
     optionalDependencies:
-      '@types/node': 20.19.25
+      '@types/node': 22.19.2
       fsevents: 2.3.3
 
   vscode-uri@3.1.0: {}
