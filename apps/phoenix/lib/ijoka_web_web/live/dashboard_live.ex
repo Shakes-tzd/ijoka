@@ -34,7 +34,7 @@ defmodule IjokaWebWeb.DashboardLive do
       case projects do
         [project | _] ->
           features = case Memgraph.get_features(project.path) do
-            {:ok, f} -> f
+            {:ok, f} -> enrich_with_hierarchy(f)
             {:error, _} -> []
           end
           stats = case Memgraph.get_stats(project.path) do
@@ -125,7 +125,7 @@ defmodule IjokaWebWeb.DashboardLive do
   @impl true
   def handle_event("select_project", %{"path" => path}, socket) do
     features = case Memgraph.get_features(path) do
-      {:ok, f} -> f
+      {:ok, f} -> enrich_with_hierarchy(f)
       {:error, _} -> []
     end
     stats = case Memgraph.get_stats(path) do
@@ -216,7 +216,7 @@ defmodule IjokaWebWeb.DashboardLive do
     if event_type in ["FeatureCompleted", "FeatureStarted", "FeatureUpdated"] &&
          socket.assigns.active_project do
       features = case Memgraph.get_features(socket.assigns.active_project) do
-        {:ok, f} -> f
+        {:ok, f} -> enrich_with_hierarchy(f)
         {:error, _} -> []
       end
       stats = case Memgraph.get_stats(socket.assigns.active_project) do
@@ -232,6 +232,29 @@ defmodule IjokaWebWeb.DashboardLive do
     else
       socket
     end
+  end
+
+  defp enrich_with_hierarchy(features) do
+    Enum.map(features, fn feature ->
+      child_count = case Memgraph.get_child_count(feature.id) do
+        {:ok, count} -> count
+        {:error, _} -> 0
+      end
+
+      # Only fetch hierarchy events for epics (performance)
+      hierarchy_events = if feature[:type] == "epic" do
+        case Memgraph.get_hierarchy_event_count(feature.id) do
+          {:ok, count} -> count
+          {:error, _} -> 0
+        end
+      else
+        nil
+      end
+
+      feature
+      |> Map.put(:child_count, child_count)
+      |> Map.put(:hierarchy_events, hierarchy_events)
+    end)
   end
 
   defp filter_by_status(features, status) do
@@ -851,10 +874,47 @@ defmodule IjokaWebWeb.DashboardLive do
     ~H"""
     <div class="feature-card" id={@id} phx-click="open_feature" phx-value-id={@feature.id}>
       <div class="feature-header">
+        <!-- Type badge -->
+        <span :if={@feature[:type] && @feature[:type] != "feature"}
+              class={"feature-type type-#{@feature.type}"}>
+          {@feature.type}
+        </span>
+
+        <!-- Category badge -->
         <span class={"feature-category category-#{@feature.category}"}>{@feature.category}</span>
+
+        <!-- Priority -->
         <span :if={@feature[:priority]} class="feature-priority">P{@feature.priority}</span>
+
+        <!-- Child count indicator -->
+        <span :if={@feature[:child_count] && @feature[:child_count] > 0}
+              class="feature-children"
+              title={"#{@feature.child_count} subtask(s)"}>
+          {@feature.child_count}
+        </span>
       </div>
+
+      <!-- Parent link -->
+      <div :if={@feature[:parent_id]} class="feature-parent">
+        <span class="parent-label">Child of:</span>
+        <span class="parent-name">{truncate(@feature[:parent_description], 30)}</span>
+      </div>
+
       <p class="feature-description">{@feature.description}</p>
+
+      <!-- Aggregated event count for epics -->
+      <div :if={@feature[:type] == "epic" && @feature[:hierarchy_events]}
+           class="feature-hierarchy-stats">
+        <span class="hierarchy-events">
+          {@feature.hierarchy_events} events across subtasks
+        </span>
+      </div>
+
+      <!-- Existing event count for this feature only -->
+      <div :if={@feature[:work_count] && @feature[:work_count] > 0} class="feature-events">
+        <span class="event-count">{@feature.work_count} actions</span>
+      </div>
+
       <div class="feature-meta">
         <span :if={@feature.agent} class={"feature-agent agent-#{agent_type(@feature.agent)}"}>
           <span class="agent-dot"></span>

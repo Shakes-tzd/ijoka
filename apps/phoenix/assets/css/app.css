@@ -517,6 +517,101 @@ body.ijoka-app {
 }
 
 /* ============================================
+   HIERARCHY DISPLAY
+   ============================================ */
+
+/* Type badge for epics and other types */
+.feature-type {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 3px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.type-epic {
+  background: rgba(167, 139, 250, 0.25);
+  color: var(--accent-purple);
+}
+
+.type-story {
+  background: rgba(96, 165, 250, 0.2);
+  color: var(--accent-blue);
+}
+
+.type-task {
+  background: rgba(251, 191, 36, 0.2);
+  color: var(--accent-yellow);
+}
+
+/* Parent link */
+.feature-parent {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.parent-label {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.parent-name {
+  color: var(--accent-purple);
+  font-weight: 600;
+}
+
+/* Child count badge */
+.feature-children {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent-purple);
+  background: rgba(167, 139, 250, 0.15);
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.feature-children::before {
+  content: '⎇';
+  font-size: 9px;
+}
+
+/* Hierarchy event count for epics */
+.feature-hierarchy-stats {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+.hierarchy-events {
+  font-size: 11px;
+  color: var(--accent-purple);
+  font-weight: 600;
+}
+
+/* Visual nesting indicator for child features */
+.feature-card.is-child {
+  margin-left: 12px;
+  border-left: 2px solid var(--accent-purple);
+}
+
+/* Epic features get special treatment */
+.feature-card.type-epic {
+  border-left: 3px solid var(--accent-purple);
+}
+
+.feature-card.type-epic .feature-description {
+  font-weight: 600;
+}
+
+/* ============================================
    ACTIVITY TIMELINE
    ============================================ */
 
