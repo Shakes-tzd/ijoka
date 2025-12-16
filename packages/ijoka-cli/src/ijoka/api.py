@@ -37,6 +37,7 @@ from .models import (
     Project,
     ProjectStats,
     Step,
+    StepStatus,
     VelocityResponse,
     WorkItemType,
 )
@@ -131,6 +132,18 @@ class AnalyticsQueryRequest(BaseModel):
 class SetPlanRequest(BaseModel):
     """Request to set plan for a feature."""
     steps: list[str] = Field(..., min_length=1, description="Ordered list of implementation steps")
+
+
+class UpdateStepRequest(BaseModel):
+    """Request to update a step's status."""
+    status: StepStatus = Field(..., description="New status for the step")
+
+
+class StepResponse(BaseModel):
+    """Response for step operations."""
+    success: bool = True
+    step: Step
+    message: Optional[str] = None
 
 
 class CheckpointRequest(BaseModel):
@@ -697,6 +710,39 @@ async def get_plan_for_active():
             steps=[s.model_dump() for s in plan_data["steps"]],
             active_step=plan_data["active_step"].model_dump() if plan_data["active_step"] else None,
             progress=plan_data["progress"],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.patch("/features/{feature_id}/steps/{step_id}", response_model=StepResponse, tags=["Planning"])
+async def update_step_status(
+    feature_id: str = Path(..., description="Feature ID"),
+    step_id: str = Path(..., description="Step ID"),
+    request: UpdateStepRequest = None,
+):
+    """Update a step's status."""
+    client = get_client()
+
+    try:
+        # Verify feature exists
+        feature = client.get_feature(feature_id)
+        if not feature:
+            raise HTTPException(status_code=404, detail=f"Feature not found: {feature_id}")
+
+        # Update step status
+        step = client.update_step_status(step_id=step_id, status=request.status.value)
+
+        status_verb = {
+            "pending": "reset to pending",
+            "in_progress": "started",
+            "completed": "completed",
+            "skipped": "skipped",
+        }.get(request.status.value, "updated")
+
+        return StepResponse(
+            step=step,
+            message=f"Step {status_verb}: {step.description[:50]}...",
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
