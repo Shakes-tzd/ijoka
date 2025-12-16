@@ -19,6 +19,9 @@ import json
 import os
 import subprocess
 import sys
+import time
+import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import Optional
 
@@ -26,6 +29,83 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent))
 import graph_db_helper as db_helper
 from git_utils import resolve_project_path
+
+# API configuration
+API_PORT = 8000
+API_URL = f"http://localhost:{API_PORT}"
+API_HEALTH_ENDPOINT = f"{API_URL}/status"
+API_STARTUP_TIMEOUT = 10  # seconds to wait for API to start
+
+
+def is_api_running() -> bool:
+    """Check if the Ijoka API is running and healthy."""
+    try:
+        req = urllib.request.Request(API_HEALTH_ENDPOINT, method='GET')
+        with urllib.request.urlopen(req, timeout=2) as response:
+            return response.status == 200
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError):
+        return False
+
+
+def start_api_server() -> tuple[bool, str]:
+    """Start the Ijoka API server in the background.
+
+    Returns:
+        (success: bool, message: str)
+    """
+    # Find the ijoka-cli directory (relative to this script's location in the plugin)
+    script_dir = Path(__file__).parent
+    # hooks/scripts -> hooks -> claude-plugin -> packages -> ijoka
+    ijoka_root = script_dir.parent.parent.parent.parent
+    ijoka_cli_dir = ijoka_root / "packages" / "ijoka-cli"
+
+    if not ijoka_cli_dir.exists():
+        return False, f"ijoka-cli directory not found at {ijoka_cli_dir}"
+
+    try:
+        # Run ijoka-server from the ijoka-cli directory using uv
+        process = subprocess.Popen(
+            ["uv", "run", "ijoka-server"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            cwd=str(ijoka_cli_dir),
+            start_new_session=True  # Detach from parent process
+        )
+
+        # Wait for API to become available
+        start_time = time.time()
+        while time.time() - start_time < API_STARTUP_TIMEOUT:
+            if is_api_running():
+                return True, f"API started successfully (PID: {process.pid})"
+            time.sleep(0.5)
+
+        return False, f"API process started (PID: {process.pid}) but not responding after {API_STARTUP_TIMEOUT}s"
+
+    except Exception as e:
+        return False, f"Failed to start API: {e}"
+
+
+def ensure_api_running() -> tuple[bool, str]:
+    """Ensure the API is running, starting it if necessary.
+
+    Returns:
+        (running: bool, message: str)
+    """
+    if is_api_running():
+        return True, "API already running"
+
+    # API not running, try to start it
+    print("🔌 Starting Ijoka API server...", file=sys.stderr)
+    success, message = start_api_server()
+
+    if success:
+        print(f"✅ {message}", file=sys.stderr)
+    else:
+        print(f"⚠️ {message}", file=sys.stderr)
+        print("   Run manually: ijoka-server", file=sys.stderr)
+
+    return success, message
+
 
 # API-first enforcement notice - included in all session contexts
 # CRITICAL: This must appear FIRST in context to ensure agent sees it before taking action
@@ -360,6 +440,9 @@ def main():
     except json.JSONDecodeError:
         hook_input = {}
 
+    # FIRST: Ensure API is running - this is critical for all agent interactions
+    api_running, api_message = ensure_api_running()
+
     session_id = hook_input.get("session_id") or os.environ.get("CLAUDE_SESSION_ID", "unknown")
 
     # Resolve project path using git-aware resolution
@@ -371,6 +454,10 @@ def main():
 
     # Run quick diagnostics
     diagnostic_warnings = run_quick_diagnostics(project_dir)
+
+    # Add API status to diagnostics
+    if not api_running:
+        diagnostic_warnings.insert(0, f"⚠️ API not running: {api_message}. Slash commands (/bug, /spike, /subtask) require API.")
 
     # Record session start in database
     db_helper.start_session(session_id, "claude-code", project_dir)
