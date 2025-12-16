@@ -359,8 +359,15 @@ def score_attribution(
             best_reason = "; ".join(reasons) if reasons else f"type:{feature_type}"
 
     # Require minimum score threshold
+    # But if below threshold, fall back to the primary or first feature
+    # rather than leaving events orphaned
     if best_score < 0.15:
-        return None, best_score, "below_threshold"
+        # Find primary feature as fallback
+        primary = next((f for f in features if f.get("is_primary")), None)
+        if primary:
+            return primary, best_score, "fallback_to_primary"
+        # Otherwise use highest priority feature (first in list, already sorted)
+        return features[0], best_score, "fallback_to_highest_priority"
 
     return best_feature, best_score, best_reason
 

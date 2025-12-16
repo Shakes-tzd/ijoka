@@ -564,7 +564,10 @@ async def set_plan_for_feature(feature_id: str, request: SetPlanRequest):
                 detail="set_plan not yet implemented in database client"
             )
 
-        steps = client.set_plan(feature_id=feature_id, steps=request.steps)
+        step_models = client.set_plan(feature_id=feature_id, steps=request.steps)
+
+        # Convert Step models to dicts
+        steps = [s.model_dump() for s in step_models]
 
         # Calculate progress
         total = len(steps)
@@ -639,7 +642,10 @@ async def set_plan_for_active(request: SetPlanRequest):
                 detail="set_plan not yet implemented in database client"
             )
 
-        steps = client.set_plan(feature_id=feature.id, steps=request.steps)
+        step_models = client.set_plan(feature_id=feature.id, steps=request.steps)
+
+        # Convert Step models to dicts
+        steps = [s.model_dump() for s in step_models]
 
         # Calculate progress
         total = len(steps)
